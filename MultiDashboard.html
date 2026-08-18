@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Times Tables — Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;800&family=Nunito:wght@500;700&family=DM+Mono:wght@500&display=swap" rel="stylesheet">
+<style>
+  :root{ --ink:#2E2E52; --paper:#FBF7EE; }
+  *{box-sizing:border-box;}
+  body{ font-family:'Nunito',sans-serif; background:var(--paper); color:var(--ink); margin:0; padding:28px 16px 60px; }
+  h1{ font-family:'Baloo 2',cursive; text-align:center; margin-bottom:4px; }
+  p.sub{ text-align:center; opacity:0.7; margin-top:0; margin-bottom:22px; }
+  .wrap{ max-width:900px; margin:0 auto; }
+  table{ width:100%; border-collapse:collapse; background:#fff; border:3px solid var(--ink); border-radius:14px; overflow:hidden; }
+  th,td{ padding:12px 14px; text-align:left; border-bottom:1px solid #E4DFD0; }
+  th{ font-family:'Baloo 2',cursive; background:var(--ink); color:#fff; }
+  tr:last-child td{ border-bottom:none; }
+  .level-pill{ font-family:'DM Mono',monospace; background:#F2A559; padding:3px 10px; border-radius:12px; font-size:13px; }
+  .done-pill{ background:#9BCB6B; }
+  .time{ font-family:'DM Mono',monospace; }
+  .meta{ text-align:center; font-size:13px; opacity:0.6; margin-top:16px; }
+  #configWarn{ background:#FBD9DC; border:2px solid #C23B4C; border-radius:10px; padding:12px 16px; margin-bottom:18px; font-size:14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Times Tables — Live Dashboard</h1>
+  <p class="sub">Auto-refreshes every 15 seconds</p>
+  <div id="configWarn" style="display:none;">
+    Set <code>APPS_SCRIPT_URL</code> at the top of this file's script to your deployed Apps Script Web App URL.
+  </div>
+  <table>
+    <thead><tr><th>Kid</th><th>Status</th><th>Level</th><th>Time so far</th><th>Best total</th><th>Last active</th></tr></thead>
+    <tbody id="rows"><tr><td colspan="6" style="text-align:center;opacity:0.6;">Loading…</td></tr></tbody>
+  </table>
+  <div class="meta" id="meta"></div>
+</div>
+
+<script>
+// Paste the same Apps Script Web App URL used in index.html
+const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw_hIjUHC78Rou2Sf9QTKrZCc0O-2kuav6YYvNcZGdb0ogG8Bx1CuO284BjwIr3FenB/exec";
+const TOTAL_LEVELS = 20;
+
+function fmtTime(sec){
+  if(sec==null || isNaN(sec)) return "--:--";
+  const m = Math.floor(sec/60), s = (sec%60).toFixed(1);
+  return `${m}:${s.padStart(4,"0")}`;
+}
+
+async function loadData(){
+  if(!APPS_SCRIPT_URL){
+    document.getElementById("configWarn").style.display="block";
+    document.getElementById("rows").innerHTML = `<tr><td colspan="6" style="text-align:center;opacity:0.6;">No Apps Script URL configured yet.</td></tr>`;
+    return;
+  }
+  try{
+    const res = await fetch(APPS_SCRIPT_URL + "?action=log");
+    const rows = await res.json(); // array of {name,event,level,levelTimeSec,totalElapsedSec,timestamp,...}
+    renderTable(rows);
+  }catch(e){
+    document.getElementById("rows").innerHTML = `<tr><td colspan="6" style="text-align:center;opacity:0.6;">Couldn't load data — check the Apps Script URL and that it's deployed as "Anyone with the link".</td></tr>`;
+  }
+}
+
+function renderTable(rows){
+  // group by name, take latest event + best run_complete time
+  const byName = {};
+  rows.forEach(r=>{
+    if(!byName[r.name]) byName[r.name] = { latest:null, best:null };
+    const bucket = byName[r.name];
+    if(!bucket.latest || new Date(r.timestamp) > new Date(bucket.latest.timestamp)) bucket.latest = r;
+    if(r.event === "run_complete"){
+      if(bucket.best==null || r.totalTimeSec < bucket.best) bucket.best = r.totalTimeSec;
+    }
+  });
+  const names = Object.keys(byName).sort();
+  if(names.length===0){
+    document.getElementById("rows").innerHTML = `<tr><td colspan="6" style="text-align:center;opacity:0.6;">No sessions logged yet.</td></tr>`;
+    return;
+  }
+  document.getElementById("rows").innerHTML = names.map(name=>{
+    const {latest,best} = byName[name];
+    const isDone = latest.event === "run_complete";
+    const levelDisplay = isDone ? "20/20" : `${latest.level||"–"}/${TOTAL_LEVELS}`;
+    const timeSoFar = isDone ? latest.totalTimeSec : latest.totalElapsedSec;
+    return `<tr>
+      <td>${name}</td>
+      <td><span class="level-pill ${isDone?'done-pill':''}">${isDone?'Finished! 🏆':'In progress'}</span></td>
+      <td>${levelDisplay}</td>
+      <td class="time">${fmtTime(timeSoFar)}</td>
+      <td class="time">${fmtTime(best)}</td>
+      <td>${new Date(latest.timestamp).toLocaleString()}</td>
+    </tr>`;
+  }).join("");
+  document.getElementById("meta").textContent = `${names.length} kid(s) with activity · updated ${new Date().toLocaleTimeString()}`;
+}
+
+loadData();
+setInterval(loadData, 15000);
+</script>
+</body>
+</html>

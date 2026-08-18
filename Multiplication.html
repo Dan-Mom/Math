@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Times Tables Challenge</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;700;800&family=Nunito:wght@500;700;800&family=DM+Mono:wght@500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#FBF7EE;
+    --ink:#2E2E52;
+    --card-shadow: 0 4px 0 rgba(46,46,82,0.18);
+    --lock:#C9C4B6;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    font-family:'Nunito',sans-serif;
+    background:var(--paper);
+    background-image:
+      radial-gradient(circle at 8% 12%, rgba(155,203,107,0.10) 0, transparent 40%),
+      radial-gradient(circle at 92% 88%, rgba(242,165,89,0.12) 0, transparent 40%);
+    color:var(--ink);
+    min-height:100vh;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    padding:24px 16px 60px;
+  }
+  h1,h2,h3{font-family:'Baloo 2',cursive; margin:0;}
+  .wrap{width:100%; max-width:920px;}
+  .brand{
+    display:flex; align-items:center; justify-content:center; gap:10px;
+    margin-bottom:26px; text-align:center;
+  }
+  .brand h1{font-size:clamp(28px,5vw,40px); letter-spacing:0.5px;}
+  .brand .x{
+    font-family:'Baloo 2',cursive; font-weight:800; font-size:clamp(28px,5vw,40px);
+    color:#F2A559;
+  }
+  .card{
+    background:#fff; border:3px solid var(--ink); border-radius:18px;
+    box-shadow:var(--card-shadow);
+  }
+  /* ---- HOME ---- */
+  .home-card{ padding:32px 28px; text-align:center; }
+  .home-card p.sub{ font-size:16px; opacity:0.75; margin:6px 0 22px; }
+  select, .name-input{
+    font-family:'Nunito',sans-serif; font-weight:700; font-size:18px;
+    padding:12px 16px; border-radius:12px; border:3px solid var(--ink);
+    width:100%; max-width:340px; background:#fff; color:var(--ink);
+  }
+  .btn{
+    font-family:'Baloo 2',cursive; font-weight:700; font-size:18px;
+    border:3px solid var(--ink); border-radius:14px; padding:12px 26px;
+    background:#F5D949; color:var(--ink); cursor:pointer;
+    box-shadow:0 4px 0 rgba(46,46,82,0.35); transition:transform .08s;
+  }
+  .btn:active{ transform:translateY(3px); box-shadow:0 1px 0 rgba(46,46,82,0.35); }
+  .btn:disabled{ opacity:0.4; cursor:not-allowed; }
+  .btn.secondary{ background:#fff; }
+  .btn.small{ font-size:14px; padding:8px 16px; border-width:2px; }
+  .row{ display:flex; gap:12px; justify-content:center; flex-wrap:wrap; margin-top:18px; }
+
+  /* ---- LEVEL GRID (mirrors the binder-sheet layout) ---- */
+  .levels-header{ display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; flex-wrap:wrap; gap:10px;}
+  .levels-header .who{ font-family:'Baloo 2',cursive; font-size:22px; }
+  .totalpill{
+    font-family:'DM Mono',monospace; background:var(--ink); color:#fff;
+    padding:8px 14px; border-radius:20px; font-size:14px; font-weight:500;
+  }
+  .grid{
+    display:grid; grid-template-columns:repeat(4,1fr); gap:14px;
+  }
+  @media (max-width:640px){ .grid{ grid-template-columns:repeat(2,1fr);} }
+  .lvl-card{
+    border:3px solid var(--ink); border-radius:14px; padding:14px 12px;
+    min-height:110px; display:flex; flex-direction:column; justify-content:space-between;
+    cursor:pointer; box-shadow:var(--card-shadow); position:relative; overflow:hidden;
+  }
+  .lvl-card .num{ font-family:'Baloo 2',cursive; font-weight:800; font-size:22px; }
+  .lvl-card .label{ font-size:12px; font-weight:800; text-transform:uppercase; letter-spacing:0.4px; opacity:0.85;}
+  .lvl-card .time{ font-family:'DM Mono',monospace; font-size:13px; margin-top:4px; }
+  .lvl-card.locked{
+    background:repeating-linear-gradient(135deg,var(--lock),var(--lock) 8px,#DAD5C7 8px,#DAD5C7 16px);
+    color:#8b8672; cursor:not-allowed; border-color:#B5AF9E;
+  }
+  .lvl-card.locked .lock-icon{ font-size:20px; }
+  .lvl-card.done::after{
+    content:"✓"; position:absolute; top:8px; right:10px; font-weight:800; font-size:16px;
+  }
+
+  /* ---- QUIZ ---- */
+  .quiz-top{ display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; flex-wrap:wrap; gap:10px;}
+  .quiz-top .lvl-tag{ font-family:'Baloo 2',cursive; font-weight:700; padding:6px 14px; border-radius:20px; border:3px solid var(--ink); }
+  .timer{ font-family:'DM Mono',monospace; font-size:22px; font-weight:500; }
+  .progress-bar{ height:12px; border:2px solid var(--ink); border-radius:8px; background:#fff; overflow:hidden; margin-bottom:22px; }
+  .progress-fill{ height:100%; background:var(--ink); transition:width .25s; }
+  .quiz-card{ padding:44px 28px; text-align:center; }
+  .question{ font-family:'Baloo 2',cursive; font-size:clamp(40px,9vw,64px); margin-bottom:26px; }
+  .quiz-card input{
+    font-family:'DM Mono',monospace; font-size:32px; text-align:center;
+    width:160px; padding:10px; border-radius:12px; border:3px solid var(--ink);
+  }
+  .quiz-card input.correct{ background:#DDF2C8; border-color:#5B8A2B; }
+  .quiz-card input.wrong{ background:#FBD9DC; border-color:#C23B4C; }
+  .feedback{ min-height:26px; margin-top:14px; font-weight:800; font-family:'Baloo 2',cursive; }
+  .feedback.ok{ color:#3E7A1F; }
+  .feedback.no{ color:#B23246; }
+  .redo-note{ font-size:13px; opacity:0.7; margin-top:10px; }
+
+  /* ---- RESULTS ---- */
+  .result-card{ padding:36px 28px; text-align:center; }
+  .result-card .big{ font-family:'DM Mono',monospace; font-size:44px; margin:14px 0; }
+  .stat-row{ display:flex; justify-content:center; gap:28px; margin:18px 0; flex-wrap:wrap; }
+  .stat{ text-align:center; }
+  .stat .n{ font-family:'Baloo 2',cursive; font-size:26px; }
+  .stat .l{ font-size:12px; text-transform:uppercase; opacity:0.7; letter-spacing:0.5px; }
+  footer{ margin-top:36px; font-size:12px; opacity:0.5; text-align:center; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="brand">
+    <h1>Times Tables</h1><span class="x">×</span><h1>Challenge</h1>
+  </div>
+  <div id="app"></div>
+  <footer>SRL Barracudas math practice · your best time is always saved</footer>
+</div>
+
+<script>
+/* =========================================================
+   CONFIG — edit these two things before publishing
+   ========================================================= */
+// 1) Add every kid's name here (shows up in the dropdown on the home screen)
+const KID_NAMES = [
+  "Ava", "Ben", "Chloe", "Daniel", "Ella", "Felix", "Grace", "Henry"
+];
+
+// 2) Paste your deployed Google Apps Script Web App URL here (see SETUP.md).
+//    Leave blank ("") to run in local-only mode with no dashboard sync.
+const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw_hIjUHC78Rou2Sf9QTKrZCc0O-2kuav6YYvNcZGdb0ogG8Bx1CuO284BjwIr3FenB/exec";
+
+/* =========================================================
+   LEVEL DEFINITIONS — 20 levels x 50 questions = 1000
+   Easy single tables first, building to hard tables,
+   then mixed-review levels at the end.
+   ========================================================= */
+const LEVELS = [
+  {n:1,  tables:[1],  label:"1x table",        color:"#CBD96B"},
+  {n:2,  tables:[2],  label:"2x table",        color:"#6EC6E8"},
+  {n:3,  tables:[10], label:"10x table",       color:"#F2A559"},
+  {n:4,  tables:[5],  label:"5x table",        color:"#B79FD1"},
+  {n:5,  tables:[3],  label:"3x table",        color:"#F2A6C4"},
+  {n:6,  tables:[4],  label:"4x table",        color:"#F2A559"},
+  {n:7,  tables:[11], label:"11x table",       color:"#B79FD1"},
+  {n:8,  tables:[9],  label:"9x table",        color:"#F2A6C4"},
+  {n:9,  tables:[6],  label:"6x table",        color:"#9BCB6B"},
+  {n:10, tables:[12], label:"12x table",       color:"#9BCB6B"},
+  {n:11, tables:[7],  label:"7x table",        color:"#F5D949"},
+  {n:12, tables:[8],  label:"8x table",        color:"#6EC6E8"},
+  {n:13, tables:[1,2,5,10],               label:"Mix: easy 4",   color:"#8EC6D9"},
+  {n:14, tables:[3,4,11,12],              label:"Mix: 3,4,11,12",color:"#D9A5D6"},
+  {n:15, tables:[6,9],                    label:"Mix: 6 & 9",    color:"#A9D98E"},
+  {n:16, tables:[7,8],                    label:"Mix: 7 & 8",    color:"#F2C15C"},
+  {n:17, tables:[1,2,3,4,5,6,9,10,11,12], label:"Mix: 10 tables",color:"#E88A6B"},
+  {n:18, tables:[1,2,3,4,5,6,7,8,9,10,11,12], label:"All 12 tables", color:"#5B7FE0"},
+  {n:19, tables:[1,2,3,4,5,6,7,8,9,10,11,12], label:"All 12, round 2", color:"#E0527F"},
+  {n:20, tables:[1,2,3,4,5,6,7,8,9,10,11,12], label:"Final Boss",     color:"#2E2E52"},
+];
+const QUESTIONS_PER_LEVEL = 50;
+const TOTAL_LEVELS = LEVELS.length;
+
+/* =========================================================
+   STATE
+   ========================================================= */
+const STORAGE_KEY = "mathfacts_progress_v1";
+function loadAllProgress(){
+  try{ return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}; }catch(e){ return {}; }
+}
+function saveAllProgress(all){ localStorage.setItem(STORAGE_KEY, JSON.stringify(all)); }
+function freshKidRecord(){
+  return { currentLevel:1, levelBestTimes:{}, runHistory:[], bestTotalTime:null, runLevelTimes:{} };
+}
+function getKidRecord(name){
+  const all = loadAllProgress();
+  if(!all[name]) all[name] = freshKidRecord();
+  return all[name];
+}
+function saveKidRecord(name, rec){
+  const all = loadAllProgress();
+  all[name] = rec;
+  saveAllProgress(all);
+}
+
+let session = { name:null, rec:null, level:null, queue:[], idx:0, mistakesThisLevel:0, startTs:0, timerHandle:null };
+
+/* =========================================================
+   SYNC TO GOOGLE SHEET (best-effort, never blocks the UI)
+   ========================================================= */
+function syncEvent(payload){
+  if(!APPS_SCRIPT_URL) return;
+  fetch(APPS_SCRIPT_URL, {
+    method:"POST",
+    headers:{ "Content-Type":"text/plain;charset=utf-8" }, // avoids CORS preflight on Apps Script
+    body: JSON.stringify(payload)
+  }).catch(()=>{ /* offline or not configured yet — local play still works */ });
+}
+
+/* =========================================================
+   QUESTION GENERATION
+   ========================================================= */
+function makeQuestion(tables){
+  const t = tables[Math.floor(Math.random()*tables.length)];
+  const other = Math.floor(Math.random()*13); // 0-12
+  const swap = Math.random() < 0.5;
+  const a = swap ? other : t;
+  const b = swap ? t : other;
+  return { a, b, answer:a*b };
+}
+function makeLevelQueue(level){
+  const q = [];
+  let prevKey = null;
+  for(let i=0;i<QUESTIONS_PER_LEVEL;i++){
+    let item;
+    do{ item = makeQuestion(level.tables); } while(`${item.a}x${item.b}`===prevKey);
+    prevKey = `${item.a}x${item.b}`;
+    q.push(item);
+  }
+  return q;
+}
+
+/* =========================================================
+   RENDER: HOME
+   ========================================================= */
+function renderHome(){
+  const app = document.getElementById("app");
+  const opts = KID_NAMES.map(n=>`<option value="${n}">${n}</option>`).join("");
+  app.innerHTML = `
+    <div class="card home-card">
+      <h2>Who's playing?</h2>
+      <p class="sub">Pick your name to see your levels and best time.</p>
+      <select id="nameSelect">
+        <option value="">— choose your name —</option>
+        ${opts}
+      </select>
+      <div class="row">
+        <button class="btn" id="goBtn" disabled>Let's go!</button>
+      </div>
+    </div>`;
+  const sel = document.getElementById("nameSelect");
+  const go = document.getElementById("goBtn");
+  sel.addEventListener("change", ()=>{ go.disabled = !sel.value; });
+  go.addEventListener("click", ()=>{
+    session.name = sel.value;
+    session.rec = getKidRecord(session.name);
+    renderLevels();
+  });
+}
+
+/* =========================================================
+   RENDER: LEVEL GRID
+   ========================================================= */
+function fmtTime(sec){
+  if(sec==null) return "--:--";
+  const m = Math.floor(sec/60), s = (sec%60).toFixed(1);
+  return `${m}:${s.padStart(4,"0")}`;
+}
+function renderLevels(){
+  const app = document.getElementById("app");
+  const rec = session.rec;
+  const cards = LEVELS.map(lv=>{
+    const unlocked = lv.n <= rec.currentLevel;
+    const done = lv.n < rec.currentLevel || rec.levelBestTimes[lv.n]!=null;
+    const cls = unlocked ? (done?"lvl-card done":"lvl-card") : "lvl-card locked";
+    const style = unlocked ? `background:${lv.color};` : "";
+    const inner = unlocked
+      ? `<div><div class="num">${lv.n}</div><div class="label">${lv.label}</div></div>
+         <div class="time">${rec.levelBestTimes[lv.n]!=null ? "best "+fmtTime(rec.levelBestTimes[lv.n]) : "50 questions"}</div>`
+      : `<div><div class="num">${lv.n}</div><div class="label">${lv.label}</div></div>
+         <div class="lock-icon">🔒</div>`;
+    return `<div class="${cls}" style="${style}" data-level="${lv.n}" data-unlocked="${unlocked}">${inner}</div>`;
+  }).join("");
+
+  const totalSoFar = Object.values(rec.levelBestTimes).reduce((a,b)=>a+b,0);
+  app.innerHTML = `
+    <div class="levels-header">
+      <div class="who">Hi, ${session.name}! 👋</div>
+      <div class="totalpill">best-time total: ${fmtTime(rec.bestTotalTime)}</div>
+    </div>
+    <div class="grid">${cards}</div>
+    <div class="row">
+      <button class="btn secondary small" id="switchBtn">Switch kid</button>
+    </div>`;
+  document.getElementById("switchBtn").addEventListener("click", renderHome);
+  document.querySelectorAll(".lvl-card").forEach(el=>{
+    el.addEventListener("click", ()=>{
+      if(el.dataset.unlocked==="true") startLevel(parseInt(el.dataset.level));
+    });
+  });
+}
+
+/* =========================================================
+   QUIZ FLOW
+   ========================================================= */
+function startLevel(n){
+  const level = LEVELS.find(l=>l.n===n);
+  session.level = level;
+  session.queue = makeLevelQueue(level);
+  session.idx = 0;
+  session.mistakesThisLevel = 0;
+  session.startTs = performance.now();
+  if(n===1){
+    session.rec.runLevelTimes = {}; // starting a fresh run at level 1
+    syncEvent({ name:session.name, event:"run_start", timestamp:new Date().toISOString() });
+  }
+  renderQuiz();
+  session.timerHandle = setInterval(updateTimerDisplay, 100);
+}
+function elapsedSec(){ return (performance.now()-session.startTs)/1000; }
+function updateTimerDisplay(){
+  const el = document.getElementById("timerVal");
+  if(el) el.textContent = fmtTime(elapsedSec());
+}
+function renderQuiz(){
+  const app = document.getElementById("app");
+  const lv = session.level;
+  const total = QUESTIONS_PER_LEVEL;
+  const solved = total - session.queue.length + (session.idx>0?0:0);
+  const answered = total - session.queue.length;
+  const pct = Math.min(100, Math.round((answered/total)*100));
+  const item = session.queue[0];
+  app.innerHTML = `
+    <div class="quiz-top">
+      <div class="lvl-tag" style="background:${lv.color}">Level ${lv.n} · ${lv.label}</div>
+      <div class="timer">⏱ <span id="timerVal">${fmtTime(elapsedSec())}</span></div>
+    </div>
+    <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
+    <div class="card quiz-card">
+      <div class="question">${item.a} × ${item.b} = ?</div>
+      <input type="number" id="answerInput" autofocus autocomplete="off" inputmode="numeric">
+      <div class="feedback" id="feedback"></div>
+      <div class="redo-note">${answered} of ${total} correct so far ${session.mistakesThisLevel>0 ? "· missed ones come back around" : ""}</div>
+    </div>`;
+  const input = document.getElementById("answerInput");
+  input.focus();
+  input.addEventListener("keydown", (e)=>{ if(e.key==="Enter") submitAnswer(); });
+}
+function submitAnswer(){
+  const input = document.getElementById("answerInput");
+  const val = parseInt(input.value,10);
+  const item = session.queue[0];
+  const fb = document.getElementById("feedback");
+  if(val === item.answer){
+    input.classList.add("correct");
+    fb.textContent = "Correct!"; fb.className="feedback ok";
+    session.queue.shift();
+  } else {
+    input.classList.add("wrong");
+    fb.textContent = `Not quite — it's ${item.answer}`; fb.className="feedback no";
+    session.mistakesThisLevel++;
+    session.queue.shift();
+    // put it back a few spots later so it's not immediately repeated
+    const reinsertAt = Math.min(session.queue.length, 4);
+    session.queue.splice(reinsertAt, 0, item);
+  }
+  input.disabled = true;
+  setTimeout(()=>{
+    if(session.queue.length===0){
+      finishLevel();
+    } else {
+      renderQuiz();
+    }
+  }, 550);
+}
+document.addEventListener("input", (e)=>{
+  // lightweight: nothing needed here, submit is via Enter key
+});
+
+function finishLevel(){
+  clearInterval(session.timerHandle);
+  const timeSec = elapsedSec();
+  const rec = session.rec;
+  const n = session.level.n;
+  if(rec.levelBestTimes[n]==null || timeSec < rec.levelBestTimes[n]){
+    rec.levelBestTimes[n] = timeSec;
+  }
+  rec.runLevelTimes[n] = timeSec;
+  if(rec.currentLevel === n && n < TOTAL_LEVELS){
+    rec.currentLevel = n+1;
+  }
+  saveKidRecord(session.name, rec);
+
+  const totalSoFarInRun = Object.values(rec.runLevelTimes).reduce((a,b)=>a+b,0);
+  syncEvent({
+    name:session.name, event:"level_complete", level:n,
+    levelTimeSec: Math.round(timeSec*10)/10,
+    mistakes: session.mistakesThisLevel,
+    totalElapsedSec: Math.round(totalSoFarInRun*10)/10,
+    timestamp:new Date().toISOString()
+  });
+
+  if(n === TOTAL_LEVELS){
+    renderRunComplete(totalSoFarInRun);
+  } else {
+    renderLevelComplete(timeSec, n);
+  }
+}
+function renderLevelComplete(timeSec, n){
+  const app = document.getElementById("app");
+  const rec = session.rec;
+  const isBest = rec.levelBestTimes[n] === timeSec;
+  app.innerHTML = `
+    <div class="card result-card">
+      <h2>Level ${n} complete! 🎉</h2>
+      <div class="big">${fmtTime(timeSec)}</div>
+      <div class="stat-row">
+        <div class="stat"><div class="n">${session.mistakesThisLevel}</div><div class="l">retries needed</div></div>
+        <div class="stat"><div class="n">${isBest?"⭐":"—"}</div><div class="l">${isBest?"new best!":"personal best stands"}</div></div>
+      </div>
+      <div class="row">
+        <button class="btn" id="nextBtn">Next level →</button>
+        <button class="btn secondary" id="mapBtn">Level map</button>
+      </div>
+    </div>`;
+  document.getElementById("nextBtn").addEventListener("click", ()=>startLevel(n+1));
+  document.getElementById("mapBtn").addEventListener("click", renderLevels);
+}
+function renderRunComplete(totalSec){
+  const app = document.getElementById("app");
+  const rec = session.rec;
+  const isNewBest = rec.bestTotalTime==null || totalSec < rec.bestTotalTime;
+  if(isNewBest) rec.bestTotalTime = totalSec;
+  rec.runHistory.push({ date:new Date().toISOString(), totalTime: totalSec });
+  saveKidRecord(session.name, rec);
+  syncEvent({ name:session.name, event:"run_complete", totalTimeSec: Math.round(totalSec*10)/10, timestamp:new Date().toISOString() });
+
+  app.innerHTML = `
+    <div class="card result-card">
+      <h2>All 1000 done, ${session.name}! 🏆</h2>
+      <div class="big">${fmtTime(totalSec)}</div>
+      <div class="stat-row">
+        <div class="stat"><div class="n">${isNewBest?"⭐ New best!":fmtTime(rec.bestTotalTime)}</div><div class="l">best total time</div></div>
+        <div class="stat"><div class="n">${rec.runHistory.length}</div><div class="l">times completed</div></div>
+      </div>
+      <p>Want to try and beat that time?</p>
+      <div class="row">
+        <button class="btn" id="againBtn">Play again from Level 1</button>
+        <button class="btn secondary" id="mapBtn2">Level map</button>
+      </div>
+    </div>`;
+  document.getElementById("againBtn").addEventListener("click", ()=>{ startLevel(1); });
+  document.getElementById("mapBtn2").addEventListener("click", renderLevels);
+}
+
+renderHome();
+</script>
+</body>
+</html>
