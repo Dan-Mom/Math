@@ -1,0 +1,15 @@
+{
+  "name": "Times Tables — Dashboard",
+  "short_name": "TT Dashboard",
+  "description": "Live status for who's playing, their level, time, and points.",
+  "start_url": "./MultiDashboard.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#FBF7EE",
+  "theme_color": "#2E2E52",
+  "icons": [
+    { "src": "./icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "./icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}

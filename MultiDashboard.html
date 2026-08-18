@@ -2,8 +2,16 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Times Tables — Dashboard</title>
+<link rel="manifest" href="./dashboard-manifest.json">
+<meta name="theme-color" content="#2E2E52">
+<link rel="icon" href="./icons/favicon-32.png" sizes="32x32">
+<link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="TT Dashboard">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;800&family=Nunito:wght@500;700&family=DM+Mono:wght@500&display=swap" rel="stylesheet">
 <style>
@@ -32,8 +40,8 @@
     Set <code>APPS_SCRIPT_URL</code> at the top of this file's script to your deployed Apps Script Web App URL.
   </div>
   <table>
-    <thead><tr><th>Kid</th><th>Status</th><th>Level</th><th>Time so far</th><th>Best total</th><th>Last active</th></tr></thead>
-    <tbody id="rows"><tr><td colspan="6" style="text-align:center;opacity:0.6;">Loading…</td></tr></tbody>
+    <thead><tr><th>Kid</th><th>Status</th><th>Progress</th><th>Time so far</th><th>Points so far</th><th>Best (time/pts)</th><th>Last active</th></tr></thead>
+    <tbody id="rows"><tr><td colspan="7" style="text-align:center;opacity:0.6;">Loading…</td></tr></tbody>
   </table>
   <div class="meta" id="meta"></div>
 </div>
@@ -52,7 +60,7 @@ function fmtTime(sec){
 async function loadData(){
   if(!APPS_SCRIPT_URL){
     document.getElementById("configWarn").style.display="block";
-    document.getElementById("rows").innerHTML = `<tr><td colspan="6" style="text-align:center;opacity:0.6;">No Apps Script URL configured yet.</td></tr>`;
+    document.getElementById("rows").innerHTML = `<tr><td colspan="7" style="text-align:center;opacity:0.6;">No Apps Script URL configured yet.</td></tr>`;
     return;
   }
   try{
@@ -60,37 +68,40 @@ async function loadData(){
     const rows = await res.json(); // array of {name,event,level,levelTimeSec,totalElapsedSec,timestamp,...}
     renderTable(rows);
   }catch(e){
-    document.getElementById("rows").innerHTML = `<tr><td colspan="6" style="text-align:center;opacity:0.6;">Couldn't load data — check the Apps Script URL and that it's deployed as "Anyone with the link".</td></tr>`;
+    document.getElementById("rows").innerHTML = `<tr><td colspan="7" style="text-align:center;opacity:0.6;">Couldn't load data — check the Apps Script URL and that it's deployed as "Anyone with the link".</td></tr>`;
   }
 }
 
 function renderTable(rows){
-  // group by name, take latest event + best run_complete time
+  // group by name, take latest event + best all_complete time/points
   const byName = {};
   rows.forEach(r=>{
-    if(!byName[r.name]) byName[r.name] = { latest:null, best:null };
+    if(!byName[r.name]) byName[r.name] = { latest:null, bestTime:null, bestPoints:null };
     const bucket = byName[r.name];
     if(!bucket.latest || new Date(r.timestamp) > new Date(bucket.latest.timestamp)) bucket.latest = r;
-    if(r.event === "run_complete"){
-      if(bucket.best==null || r.totalTimeSec < bucket.best) bucket.best = r.totalTimeSec;
+    if(r.event === "all_complete"){
+      if(bucket.bestTime==null || r.totalTimeSec < bucket.bestTime) bucket.bestTime = r.totalTimeSec;
+      if(bucket.bestPoints==null || r.totalPoints > bucket.bestPoints) bucket.bestPoints = r.totalPoints;
     }
   });
   const names = Object.keys(byName).sort();
   if(names.length===0){
-    document.getElementById("rows").innerHTML = `<tr><td colspan="6" style="text-align:center;opacity:0.6;">No sessions logged yet.</td></tr>`;
+    document.getElementById("rows").innerHTML = `<tr><td colspan="7" style="text-align:center;opacity:0.6;">No sessions logged yet.</td></tr>`;
     return;
   }
   document.getElementById("rows").innerHTML = names.map(name=>{
-    const {latest,best} = byName[name];
-    const isDone = latest.event === "run_complete";
-    const levelDisplay = isDone ? "20/20" : `${latest.level||"–"}/${TOTAL_LEVELS}`;
-    const timeSoFar = isDone ? latest.totalTimeSec : latest.totalElapsedSec;
+    const {latest,bestTime,bestPoints} = byName[name];
+    const isDone = latest.event === "all_complete";
+    const levelDisplay = isDone ? "20/20" : `level ${latest.level||"–"}`;
+    const timeSoFar = latest.totalTimeSec;
+    const pointsSoFar = latest.totalPoints;
     return `<tr>
       <td>${name}</td>
       <td><span class="level-pill ${isDone?'done-pill':''}">${isDone?'Finished! 🏆':'In progress'}</span></td>
       <td>${levelDisplay}</td>
       <td class="time">${fmtTime(timeSoFar)}</td>
-      <td class="time">${fmtTime(best)}</td>
+      <td>⭐ ${pointsSoFar!=null && pointsSoFar!=="" ? pointsSoFar : 0}</td>
+      <td class="time">${bestTime!=null ? fmtTime(bestTime)+" / "+bestPoints+"pts" : "—"}</td>
       <td>${new Date(latest.timestamp).toLocaleString()}</td>
     </tr>`;
   }).join("");
@@ -99,6 +110,12 @@ function renderTable(rows){
 
 loadData();
 setInterval(loadData, 15000);
+
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("./sw.js").catch(() => {});
+  });
+}
 </script>
 </body>
 </html>

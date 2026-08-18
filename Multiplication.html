@@ -2,8 +2,16 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Times Tables Challenge</title>
+<link rel="manifest" href="./manifest.json">
+<meta name="theme-color" content="#2E2E52">
+<link rel="icon" href="./icons/favicon-32.png" sizes="32x32">
+<link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Times Tables">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;700;800&family=Nunito:wght@500;700;800&family=DM+Mono:wght@500&display=swap" rel="stylesheet">
 <style>
@@ -82,11 +90,6 @@
   .lvl-card .num{ font-family:'Baloo 2',cursive; font-weight:800; font-size:22px; }
   .lvl-card .label{ font-size:12px; font-weight:800; text-transform:uppercase; letter-spacing:0.4px; opacity:0.85;}
   .lvl-card .time{ font-family:'DM Mono',monospace; font-size:13px; margin-top:4px; }
-  .lvl-card.locked{
-    background:repeating-linear-gradient(135deg,var(--lock),var(--lock) 8px,#DAD5C7 8px,#DAD5C7 16px);
-    color:#8b8672; cursor:not-allowed; border-color:#B5AF9E;
-  }
-  .lvl-card.locked .lock-icon{ font-size:20px; }
   .lvl-card.done::after{
     content:"✓"; position:absolute; top:8px; right:10px; font-weight:800; font-size:16px;
   }
@@ -126,17 +129,17 @@
     <h1>Times Tables</h1><span class="x">×</span><h1>Challenge</h1>
   </div>
   <div id="app"></div>
-  <footer>SRL Barracudas math practice · your best time is always saved</footer>
+  <footer>Multiplication Practice · your best time is always saved</footer>
 </div>
 
 <script>
 /* =========================================================
    CONFIG — edit these two things before publishing
    ========================================================= */
-// 1) Add every kid's name here (shows up in the dropdown on the home screen)
-const KID_NAMES = [
-  "Ava", "Ben", "Chloe", "Daniel", "Ella", "Felix", "Grace", "Henry"
-];
+// 1) If the Google Sheet roster can't be reached (offline, or no URL set below),
+//    this fallback list is shown instead. Leave it empty so only names kids
+//    have actually added themselves show up.
+const KID_NAMES = [];
 
 // 2) Paste your deployed Google Apps Script Web App URL here (see SETUP.md).
 //    Leave blank ("") to run in local-only mode with no dashboard sync.
@@ -181,7 +184,7 @@ function loadAllProgress(){
 }
 function saveAllProgress(all){ localStorage.setItem(STORAGE_KEY, JSON.stringify(all)); }
 function freshKidRecord(){
-  return { currentLevel:1, levelBestTimes:{}, runHistory:[], bestTotalTime:null, runLevelTimes:{} };
+  return { levelBestTimes:{}, levelPoints:{}, timesFullyCompleted:0 };
 }
 function getKidRecord(name){
   const all = loadAllProgress();
@@ -194,7 +197,7 @@ function saveKidRecord(name, rec){
   saveAllProgress(all);
 }
 
-let session = { name:null, rec:null, level:null, queue:[], idx:0, mistakesThisLevel:0, startTs:0, timerHandle:null };
+let session = { name:null, rec:null, level:null, queue:[], idx:0, mistakesThisLevel:0, pointsThisLevel:0, startTs:0, timerHandle:null };
 
 /* =========================================================
    SYNC TO GOOGLE SHEET (best-effort, never blocks the UI)
@@ -217,7 +220,7 @@ function makeQuestion(tables){
   const swap = Math.random() < 0.5;
   const a = swap ? other : t;
   const b = swap ? t : other;
-  return { a, b, answer:a*b };
+  return { a, b, answer:a*b, firstTry:true };
 }
 function makeLevelQueue(level){
   const q = [];
@@ -232,26 +235,95 @@ function makeLevelQueue(level){
 }
 
 /* =========================================================
-   RENDER: HOME
+   RENDER: HOME (name list lives in the Google Sheet "Names" tab)
    ========================================================= */
-function renderHome(){
+let rosterCache = null; // array of names once loaded
+
+async function fetchRoster(){
+  if(!APPS_SCRIPT_URL) return KID_NAMES.slice();
+  try{
+    const res = await fetch(APPS_SCRIPT_URL + "?action=names");
+    const names = await res.json();
+    if(Array.isArray(names) && names.length){
+      // merge with fallback seed list, de-duped, so the list never looks empty
+      const merged = names.slice();
+      KID_NAMES.forEach(n=>{ if(!merged.some(m=>m.toLowerCase()===n.toLowerCase())) merged.push(n); });
+      return merged.sort((a,b)=>a.localeCompare(b));
+    }
+    return KID_NAMES.slice();
+  }catch(e){
+    return KID_NAMES.slice();
+  }
+}
+
+function renderNameOptions(selectEl, names, selected){
+  const opts = names.map(n=>`<option value="${n}" ${n===selected?"selected":""}>${n}</option>`).join("");
+  selectEl.innerHTML = `
+    <option value="">— choose your name —</option>
+    ${opts}
+    <option value="__add__">➕ Add my name</option>`;
+}
+
+async function renderHome(){
   const app = document.getElementById("app");
-  const opts = KID_NAMES.map(n=>`<option value="${n}">${n}</option>`).join("");
   app.innerHTML = `
     <div class="card home-card">
       <h2>Who's playing?</h2>
       <p class="sub">Pick your name to see your levels and best time.</p>
-      <select id="nameSelect">
-        <option value="">— choose your name —</option>
-        ${opts}
-      </select>
+      <select id="nameSelect" disabled><option>Loading names…</option></select>
+      <div id="addNameBox" style="display:none; margin-top:14px;">
+        <input type="text" id="newNameInput" class="name-input" placeholder="Type your name" maxlength="30">
+        <div class="row">
+          <button class="btn small" id="saveNameBtn">Save my name</button>
+          <button class="btn secondary small" id="cancelNameBtn">Cancel</button>
+        </div>
+      </div>
       <div class="row">
         <button class="btn" id="goBtn" disabled>Let's go!</button>
       </div>
     </div>`;
+
   const sel = document.getElementById("nameSelect");
   const go = document.getElementById("goBtn");
-  sel.addEventListener("change", ()=>{ go.disabled = !sel.value; });
+  const addBox = document.getElementById("addNameBox");
+
+  rosterCache = await fetchRoster();
+  sel.disabled = false;
+  renderNameOptions(sel, rosterCache, "");
+
+  sel.addEventListener("change", ()=>{
+    if(sel.value === "__add__"){
+      addBox.style.display = "block";
+      go.disabled = true;
+      document.getElementById("newNameInput").focus();
+    } else {
+      addBox.style.display = "none";
+      go.disabled = !sel.value;
+    }
+  });
+
+  document.getElementById("cancelNameBtn").addEventListener("click", ()=>{
+    addBox.style.display = "none";
+    sel.value = "";
+    go.disabled = true;
+  });
+
+  document.getElementById("saveNameBtn").addEventListener("click", async ()=>{
+    const input = document.getElementById("newNameInput");
+    const name = input.value.trim();
+    if(!name) return;
+    const dup = rosterCache.find(n=>n.toLowerCase()===name.toLowerCase());
+    const finalName = dup || name;
+    if(!dup){
+      rosterCache.push(finalName);
+      rosterCache.sort((a,b)=>a.localeCompare(b));
+      syncEvent({ name:finalName, event:"add_name", timestamp:new Date().toISOString() });
+    }
+    renderNameOptions(sel, rosterCache, finalName);
+    addBox.style.display = "none";
+    go.disabled = false;
+  });
+
   go.addEventListener("click", ()=>{
     session.name = sel.value;
     session.rec = getKidRecord(session.name);
@@ -271,33 +343,33 @@ function renderLevels(){
   const app = document.getElementById("app");
   const rec = session.rec;
   const cards = LEVELS.map(lv=>{
-    const unlocked = lv.n <= rec.currentLevel;
-    const done = lv.n < rec.currentLevel || rec.levelBestTimes[lv.n]!=null;
-    const cls = unlocked ? (done?"lvl-card done":"lvl-card") : "lvl-card locked";
-    const style = unlocked ? `background:${lv.color};` : "";
-    const inner = unlocked
-      ? `<div><div class="num">${lv.n}</div><div class="label">${lv.label}</div></div>
-         <div class="time">${rec.levelBestTimes[lv.n]!=null ? "best "+fmtTime(rec.levelBestTimes[lv.n]) : "50 questions"}</div>`
-      : `<div><div class="num">${lv.n}</div><div class="label">${lv.label}</div></div>
-         <div class="lock-icon">🔒</div>`;
-    return `<div class="${cls}" style="${style}" data-level="${lv.n}" data-unlocked="${unlocked}">${inner}</div>`;
+    const done = rec.levelBestTimes[lv.n]!=null;
+    const cls = done ? "lvl-card done" : "lvl-card";
+    const pointsPerCorrect = lv.n * 10;
+    const inner = `<div><div class="num">${lv.n}</div><div class="label">${lv.label}</div></div>
+         <div class="time">${done ? "best "+fmtTime(rec.levelBestTimes[lv.n])+" · "+rec.levelPoints[lv.n]+" pts" : pointsPerCorrect+" pts/answer"}</div>`;
+    return `<div class="${cls}" style="background:${lv.color};" data-level="${lv.n}">${inner}</div>`;
   }).join("");
 
-  const totalSoFar = Object.values(rec.levelBestTimes).reduce((a,b)=>a+b,0);
+  const completedCount = Object.keys(rec.levelBestTimes).length;
+  const totalTime = Object.values(rec.levelBestTimes).reduce((a,b)=>a+b,0);
+  const totalPoints = Object.values(rec.levelPoints).reduce((a,b)=>a+b,0);
   app.innerHTML = `
     <div class="levels-header">
       <div class="who">Hi, ${session.name}! 👋</div>
-      <div class="totalpill">best-time total: ${fmtTime(rec.bestTotalTime)}</div>
+      <div class="row" style="margin-top:0;">
+        <div class="totalpill">${completedCount}/${TOTAL_LEVELS} levels · ${fmtTime(totalTime)}</div>
+        <div class="totalpill" style="background:#F2A559;color:var(--ink);">⭐ ${totalPoints} pts</div>
+      </div>
     </div>
+    <p class="sub" style="margin:0 0 16px;">Play any level, in any order — higher levels earn more points per answer.</p>
     <div class="grid">${cards}</div>
     <div class="row">
       <button class="btn secondary small" id="switchBtn">Switch kid</button>
     </div>`;
   document.getElementById("switchBtn").addEventListener("click", renderHome);
   document.querySelectorAll(".lvl-card").forEach(el=>{
-    el.addEventListener("click", ()=>{
-      if(el.dataset.unlocked==="true") startLevel(parseInt(el.dataset.level));
-    });
+    el.addEventListener("click", ()=> startLevel(parseInt(el.dataset.level)) );
   });
 }
 
@@ -310,11 +382,8 @@ function startLevel(n){
   session.queue = makeLevelQueue(level);
   session.idx = 0;
   session.mistakesThisLevel = 0;
+  session.pointsThisLevel = 0;
   session.startTs = performance.now();
-  if(n===1){
-    session.rec.runLevelTimes = {}; // starting a fresh run at level 1
-    syncEvent({ name:session.name, event:"run_start", timestamp:new Date().toISOString() });
-  }
   renderQuiz();
   session.timerHandle = setInterval(updateTimerDisplay, 100);
 }
@@ -327,45 +396,57 @@ function renderQuiz(){
   const app = document.getElementById("app");
   const lv = session.level;
   const total = QUESTIONS_PER_LEVEL;
-  const solved = total - session.queue.length + (session.idx>0?0:0);
   const answered = total - session.queue.length;
   const pct = Math.min(100, Math.round((answered/total)*100));
   const item = session.queue[0];
   app.innerHTML = `
     <div class="quiz-top">
-      <div class="lvl-tag" style="background:${lv.color}">Level ${lv.n} · ${lv.label}</div>
+      <div class="lvl-tag" style="background:${lv.color}">Level ${lv.n} · ${lv.label} · ${lv.n*10} pts/answer</div>
       <div class="timer">⏱ <span id="timerVal">${fmtTime(elapsedSec())}</span></div>
     </div>
     <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
     <div class="card quiz-card">
       <div class="question">${item.a} × ${item.b} = ?</div>
-      <input type="number" id="answerInput" autofocus autocomplete="off" inputmode="numeric">
+      <input type="number" id="answerInput" autofocus autocomplete="off" inputmode="numeric" pattern="[0-9]*" enterkeyhint="done">
+      <div class="row" style="margin-top:14px;">
+        <button class="btn" id="submitBtn">Check ✓</button>
+      </div>
       <div class="feedback" id="feedback"></div>
       <div class="redo-note">${answered} of ${total} correct so far ${session.mistakesThisLevel>0 ? "· missed ones come back around" : ""}</div>
     </div>`;
   const input = document.getElementById("answerInput");
   input.focus();
   input.addEventListener("keydown", (e)=>{ if(e.key==="Enter") submitAnswer(); });
+  document.getElementById("submitBtn").addEventListener("click", submitAnswer);
 }
 function submitAnswer(){
   const input = document.getElementById("answerInput");
+  const submitBtn = document.getElementById("submitBtn");
+  if(input.disabled) return; // already answered, waiting to advance
   const val = parseInt(input.value,10);
   const item = session.queue[0];
   const fb = document.getElementById("feedback");
   if(val === item.answer){
     input.classList.add("correct");
-    fb.textContent = "Correct!"; fb.className="feedback ok";
+    if(item.firstTry){
+      session.pointsThisLevel += session.level.n * 10;
+      fb.textContent = `Correct! +${session.level.n*10} pts`; fb.className="feedback ok";
+    } else {
+      fb.textContent = "Correct!"; fb.className="feedback ok";
+    }
     session.queue.shift();
   } else {
     input.classList.add("wrong");
     fb.textContent = `Not quite — it's ${item.answer}`; fb.className="feedback no";
     session.mistakesThisLevel++;
+    item.firstTry = false;
     session.queue.shift();
     // put it back a few spots later so it's not immediately repeated
     const reinsertAt = Math.min(session.queue.length, 4);
     session.queue.splice(reinsertAt, 0, item);
   }
   input.disabled = true;
+  submitBtn.disabled = true;
   setTimeout(()=>{
     if(session.queue.length===0){
       finishLevel();
@@ -374,84 +455,89 @@ function submitAnswer(){
     }
   }, 550);
 }
-document.addEventListener("input", (e)=>{
-  // lightweight: nothing needed here, submit is via Enter key
-});
-
 function finishLevel(){
   clearInterval(session.timerHandle);
   const timeSec = elapsedSec();
   const rec = session.rec;
   const n = session.level.n;
-  if(rec.levelBestTimes[n]==null || timeSec < rec.levelBestTimes[n]){
-    rec.levelBestTimes[n] = timeSec;
+
+  const wasFullyDone = Object.keys(rec.levelBestTimes).length === TOTAL_LEVELS;
+
+  const isNewBestTime = rec.levelBestTimes[n]==null || timeSec < rec.levelBestTimes[n];
+  if(isNewBestTime) rec.levelBestTimes[n] = timeSec;
+  if(rec.levelPoints[n]==null || session.pointsThisLevel > rec.levelPoints[n]){
+    rec.levelPoints[n] = session.pointsThisLevel;
   }
-  rec.runLevelTimes[n] = timeSec;
-  if(rec.currentLevel === n && n < TOTAL_LEVELS){
-    rec.currentLevel = n+1;
-  }
+
+  const nowFullyDone = Object.keys(rec.levelBestTimes).length === TOTAL_LEVELS;
+  const justCompletedAll = !wasFullyDone && nowFullyDone;
+  if(justCompletedAll) rec.timesFullyCompleted++;
+
   saveKidRecord(session.name, rec);
 
-  const totalSoFarInRun = Object.values(rec.runLevelTimes).reduce((a,b)=>a+b,0);
+  const totalTimeSoFar = Object.values(rec.levelBestTimes).reduce((a,b)=>a+b,0);
+  const totalPointsSoFar = Object.values(rec.levelPoints).reduce((a,b)=>a+b,0);
   syncEvent({
-    name:session.name, event:"level_complete", level:n,
+    name:session.name, event: nowFullyDone ? "all_complete" : "level_complete", level:n,
     levelTimeSec: Math.round(timeSec*10)/10,
     mistakes: session.mistakesThisLevel,
-    totalElapsedSec: Math.round(totalSoFarInRun*10)/10,
+    levelPoints: session.pointsThisLevel,
+    totalElapsedSec: Math.round(totalTimeSoFar*10)/10,
+    totalTimeSec: Math.round(totalTimeSoFar*10)/10,
+    totalPoints: totalPointsSoFar,
     timestamp:new Date().toISOString()
   });
 
-  if(n === TOTAL_LEVELS){
-    renderRunComplete(totalSoFarInRun);
-  } else {
-    renderLevelComplete(timeSec, n);
-  }
+  renderLevelComplete(timeSec, n, isNewBestTime, nowFullyDone, totalTimeSoFar, totalPointsSoFar);
 }
-function renderLevelComplete(timeSec, n){
+function renderLevelComplete(timeSec, n, isNewBestTime, nowFullyDone, totalTimeSoFar, totalPointsSoFar){
+  if(nowFullyDone){ renderAllComplete(totalTimeSoFar, totalPointsSoFar); return; }
   const app = document.getElementById("app");
   const rec = session.rec;
-  const isBest = rec.levelBestTimes[n] === timeSec;
+  const completedCount = Object.keys(rec.levelBestTimes).length;
   app.innerHTML = `
     <div class="card result-card">
       <h2>Level ${n} complete! 🎉</h2>
       <div class="big">${fmtTime(timeSec)}</div>
       <div class="stat-row">
+        <div class="stat"><div class="n">⭐ ${session.pointsThisLevel}</div><div class="l">points earned</div></div>
         <div class="stat"><div class="n">${session.mistakesThisLevel}</div><div class="l">retries needed</div></div>
-        <div class="stat"><div class="n">${isBest?"⭐":"—"}</div><div class="l">${isBest?"new best!":"personal best stands"}</div></div>
+        <div class="stat"><div class="n">${isNewBestTime?"⭐":"—"}</div><div class="l">${isNewBestTime?"new best time!":"best time stands"}</div></div>
       </div>
+      <p class="sub" style="margin-bottom:0;">${completedCount}/${TOTAL_LEVELS} levels played · pick any level next</p>
       <div class="row">
-        <button class="btn" id="nextBtn">Next level →</button>
-        <button class="btn secondary" id="mapBtn">Level map</button>
+        <button class="btn" id="mapBtn">Level map</button>
+        <button class="btn secondary" id="againBtn">Play this level again</button>
       </div>
     </div>`;
-  document.getElementById("nextBtn").addEventListener("click", ()=>startLevel(n+1));
   document.getElementById("mapBtn").addEventListener("click", renderLevels);
+  document.getElementById("againBtn").addEventListener("click", ()=>startLevel(n));
 }
-function renderRunComplete(totalSec){
+function renderAllComplete(totalTimeSoFar, totalPointsSoFar){
   const app = document.getElementById("app");
   const rec = session.rec;
-  const isNewBest = rec.bestTotalTime==null || totalSec < rec.bestTotalTime;
-  if(isNewBest) rec.bestTotalTime = totalSec;
-  rec.runHistory.push({ date:new Date().toISOString(), totalTime: totalSec });
-  saveKidRecord(session.name, rec);
-  syncEvent({ name:session.name, event:"run_complete", totalTimeSec: Math.round(totalSec*10)/10, timestamp:new Date().toISOString() });
-
   app.innerHTML = `
     <div class="card result-card">
-      <h2>All 1000 done, ${session.name}! 🏆</h2>
-      <div class="big">${fmtTime(totalSec)}</div>
+      <h2>All 1000 questions done, ${session.name}! 🏆</h2>
+      <div class="big">${fmtTime(totalTimeSoFar)}</div>
       <div class="stat-row">
-        <div class="stat"><div class="n">${isNewBest?"⭐ New best!":fmtTime(rec.bestTotalTime)}</div><div class="l">best total time</div></div>
-        <div class="stat"><div class="n">${rec.runHistory.length}</div><div class="l">times completed</div></div>
+        <div class="stat"><div class="n">⭐ ${totalPointsSoFar}</div><div class="l">total points</div></div>
+        <div class="stat"><div class="n">${rec.timesFullyCompleted}</div><div class="l">times all-completed</div></div>
       </div>
-      <p>Want to try and beat that time?</p>
+      <p>Both your best time and your points can still improve — replay any level to try and beat them.</p>
       <div class="row">
-        <button class="btn" id="againBtn">Play again from Level 1</button>
-        <button class="btn secondary" id="mapBtn2">Level map</button>
+        <button class="btn" id="mapBtn2">Level map</button>
       </div>
     </div>`;
-  document.getElementById("againBtn").addEventListener("click", ()=>{ startLevel(1); });
   document.getElementById("mapBtn2").addEventListener("click", renderLevels);
+}
+
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("./sw.js").catch(() => {
+      /* offline install just won't be available — app still works online */
+    });
+  });
 }
 
 renderHome();
