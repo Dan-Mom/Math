@@ -110,7 +110,7 @@
   }
   .numpad{ display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
   .numpad button{
-    font-family:'DM Mono',monospace; font-size:26px; font-weight:700;
+    font-family:'Baloo 2',cursive; font-size:28px; font-weight:700;
     padding:16px 0; border-radius:14px; border:3px solid var(--ink);
     background:#fff; color:var(--ink); cursor:pointer;
     box-shadow:0 3px 0 rgba(46,46,82,0.25);
@@ -120,7 +120,7 @@
   .numpad button.back{ background:#FFE8B8; font-size:20px; }
   .question{ font-family:'Baloo 2',cursive; font-size:clamp(38px,7vw,58px); margin-bottom:20px; }
   .answer-display{
-    font-family:'DM Mono',monospace; font-size:40px; font-weight:500; letter-spacing:6px;
+    font-family:'Baloo 2',cursive; font-size:40px; font-weight:700; letter-spacing:6px;
     min-height:70px; border:3px solid var(--ink); border-radius:14px; background:#fff;
     display:flex; align-items:center; justify-content:center; margin:0 auto; max-width:220px;
   }
@@ -139,6 +139,15 @@
   .stat{ text-align:center; }
   .stat .n{ font-family:'Baloo 2',cursive; font-size:26px; }
   .stat .l{ font-size:12px; text-transform:uppercase; opacity:0.7; letter-spacing:0.5px; }
+  .mistakes-box{ text-align:left; max-width:420px; margin:18px auto 0; border:3px solid var(--ink); border-radius:14px; overflow:hidden; }
+  .mistakes-box h3{ font-family:'Baloo 2',cursive; font-size:16px; background:var(--ink); color:#fff; padding:8px 14px; margin:0; }
+  .mistakes-list{ max-height:220px; overflow-y:auto; }
+  .mistakes-row{ display:flex; justify-content:space-between; align-items:center; padding:8px 14px; font-size:14px; border-bottom:1px solid #EFEAE0; }
+  .mistakes-row:last-child{ border-bottom:none; }
+  .mistakes-row .q{ font-family:'Baloo 2',cursive; font-weight:700; }
+  .mistakes-row .a{ font-family:'DM Mono',monospace; font-size:13px; }
+  .mistakes-row .a .given{ color:#B23246; text-decoration:line-through; margin-right:6px; }
+  .mistakes-row .a .correct{ color:#3E7A1F; font-weight:700; }
   footer{ margin-top:36px; font-size:12px; opacity:0.5; text-align:center; }
 </style>
 </head>
@@ -216,7 +225,7 @@ function saveKidRecord(name, rec){
   saveAllProgress(all);
 }
 
-let session = { name:null, rec:null, level:null, queue:[], missedQueue:[], round:1, roundTotal:0, currentAnswer:"", mistakesThisLevel:0, pointsThisLevel:0, startTs:0, timerHandle:null };
+let session = { name:null, rec:null, level:null, queue:[], missedQueue:[], round:1, roundTotal:0, currentAnswer:"", mistakesThisLevel:0, mistakesLog:[], pointsThisLevel:0, startTs:0, timerHandle:null };
 
 /* =========================================================
    SYNC TO GOOGLE SHEET (best-effort, never blocks the UI)
@@ -460,6 +469,7 @@ function startLevel(n){
   session.roundTotal = session.queue.length;
   session.currentAnswer = "";
   session.mistakesThisLevel = 0;
+  session.mistakesLog = [];
   session.pointsThisLevel = 0;
   session.startTs = performance.now();
   renderQuiz();
@@ -490,7 +500,10 @@ function renderQuiz(){
   app.innerHTML = `
     <div class="quiz-top">
       <div class="lvl-tag" style="background:${lv.color}; color:${textColorFor(lv.color)};">Level ${lv.n} · ${lv.label} · ${lv.n*10} pts/answer</div>
-      <div class="timer">⏱ <span id="timerVal">${fmtTime(elapsedSec())}</span></div>
+      <div class="row" style="margin-top:0; gap:12px;">
+        <div class="timer">⏱ <span id="timerVal">${fmtTime(elapsedSec())}</span></div>
+        <button class="btn secondary small" id="giveUpBtn">Give up ✕</button>
+      </div>
     </div>
     <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
     <div class="card quiz-card">
@@ -515,6 +528,8 @@ function renderQuiz(){
       </div>
     </div>`;
 
+  document.getElementById("giveUpBtn").addEventListener("click", renderGiveUpConfirm);
+
   document.querySelectorAll(".numpad button[data-digit]").forEach(btn=>{
     btn.addEventListener("click", ()=>{
       if(session.currentAnswer.length >= 3) return;
@@ -531,6 +546,25 @@ function renderQuiz(){
     updateAnswerDisplay();
   });
   document.getElementById("submitBtn").addEventListener("click", submitAnswer);
+}
+function renderGiveUpConfirm(){
+  clearInterval(session.timerHandle);
+  const app = document.getElementById("app");
+  const lv = session.level;
+  app.innerHTML = `
+    <div class="card result-card">
+      <h2>Stop this level?</h2>
+      <p>You're on Level ${lv.n} · ${lv.label}. If you stop now, this attempt won't be saved — but any earlier best times and points stay safe.</p>
+      <div class="row">
+        <button class="btn" id="keepGoingBtn">No, keep going</button>
+        <button class="btn secondary" id="confirmGiveUpBtn">Yes, stop and go back</button>
+      </div>
+    </div>`;
+  document.getElementById("keepGoingBtn").addEventListener("click", ()=>{
+    session.timerHandle = setInterval(updateTimerDisplay, 100);
+    renderQuiz();
+  });
+  document.getElementById("confirmGiveUpBtn").addEventListener("click", renderLevels);
 }
 function submitAnswer(){
   const disp = document.getElementById("answerDisplay");
@@ -552,6 +586,11 @@ function submitAnswer(){
     disp.classList.add("wrong");
     fb.textContent = `Not quite — it's ${item.answer}`; fb.className="feedback no";
     session.mistakesThisLevel++;
+    session.mistakesLog.push({
+      a: item.a, b: item.b, correct: item.answer,
+      given: session.currentAnswer === "" ? "(left blank)" : session.currentAnswer,
+      round: session.round
+    });
     item.firstTry = false;
     session.queue.shift();
     session.missedQueue.push(item);
@@ -579,9 +618,13 @@ function renderRoundReview(){
       <h2>Round ${session.round} done! 👀</h2>
       <p>You missed <strong>${missedCount}</strong> question${missedCount===1?"":"s"} this round.</p>
       <p>Want to try ${missedCount===1?"it":"them"} again until you get ${missedCount===1?"it":"them all"} right?</p>
+      ${mistakesListHtml(session.round)}
       <div class="row">
         <button class="btn" id="retryYes">Yes, try again</button>
         <button class="btn secondary" id="retryNo">No, I'm done</button>
+      </div>
+      <div class="row">
+        <button class="btn secondary small" id="giveUpBtnRound">Give up on this level ✕</button>
       </div>
     </div>`;
   document.getElementById("retryYes").addEventListener("click", ()=>{
@@ -592,6 +635,10 @@ function renderRoundReview(){
     renderQuiz();
   });
   document.getElementById("retryNo").addEventListener("click", finishLevel);
+  document.getElementById("giveUpBtnRound").addEventListener("click", ()=>{
+    clearInterval(session.timerHandle);
+    renderLevels();
+  });
 }
 function finishLevel(){
   clearInterval(session.timerHandle);
@@ -628,6 +675,22 @@ function finishLevel(){
 
   renderLevelComplete(timeSec, n, isNewBestTime, nowFullyDone, totalTimeSoFar, totalPointsSoFar);
 }
+function mistakesListHtml(onlyRound){
+  let entries = session.mistakesLog || [];
+  if(onlyRound != null) entries = entries.filter(m=>m.round===onlyRound);
+  if(entries.length===0) return "";
+  const rows = entries.map(m=>{
+    const roundNote = m.round > 1 ? ` <span style="opacity:0.6;">(round ${m.round})</span>` : "";
+    return `<div class="mistakes-row">
+      <span class="q">${m.a} × ${m.b}${roundNote}</span>
+      <span class="a"><span class="given">${m.given}</span><span class="correct">${m.correct}</span></span>
+    </div>`;
+  }).join("");
+  return `<div class="mistakes-box">
+    <h3>Questions to review (${entries.length})</h3>
+    <div class="mistakes-list">${rows}</div>
+  </div>`;
+}
 function renderLevelComplete(timeSec, n, isNewBestTime, nowFullyDone, totalTimeSoFar, totalPointsSoFar){
   if(nowFullyDone){ renderAllComplete(totalTimeSoFar, totalPointsSoFar); return; }
   const app = document.getElementById("app");
@@ -642,6 +705,7 @@ function renderLevelComplete(timeSec, n, isNewBestTime, nowFullyDone, totalTimeS
         <div class="stat"><div class="n">${session.mistakesThisLevel}</div><div class="l">retries needed</div></div>
         <div class="stat"><div class="n">${isNewBestTime?"⭐":"—"}</div><div class="l">${isNewBestTime?"new best time!":"best time stands"}</div></div>
       </div>
+      ${mistakesListHtml()}
       <p class="sub" style="margin-bottom:0;">${completedCount}/${TOTAL_LEVELS} levels played · pick any level next</p>
       <div class="row">
         <button class="btn" id="mapBtn">Level map</button>
@@ -663,6 +727,7 @@ function renderAllComplete(totalTimeSoFar, totalPointsSoFar){
         <div class="stat"><div class="n">${rec.timesFullyCompleted}</div><div class="l">times all-completed</div></div>
       </div>
       <p>Both your best time and your points can still improve — replay any level to try and beat them.</p>
+      ${mistakesListHtml()}
       <div class="row">
         <button class="btn" id="mapBtn2">Level map</button>
       </div>
