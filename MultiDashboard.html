@@ -15,34 +15,97 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;800&family=Nunito:wght@500;700&family=DM+Mono:wght@500&display=swap" rel="stylesheet">
 <style>
-  :root{ --ink:#2E2E52; --paper:#FBF7EE; }
+  :root{ --ink:#2E2E52; --paper:#FBF7EE; --card-shadow: 0 4px 0 rgba(46,46,82,0.18); }
   *{box-sizing:border-box;}
   body{ font-family:'Nunito',sans-serif; background:var(--paper); color:var(--ink); margin:0; padding:28px 16px 60px; }
-  h1{ font-family:'Baloo 2',cursive; text-align:center; margin-bottom:4px; }
+  h1{ font-family:'Baloo 2',cursive; text-align:center; margin-bottom:4px; font-size:clamp(24px,5vw,34px); }
+  h2{ font-family:'Baloo 2',cursive; margin:0 0 4px; }
   p.sub{ text-align:center; opacity:0.7; margin-top:0; margin-bottom:22px; }
-  .wrap{ max-width:900px; margin:0 auto; }
+  .wrap{ max-width:1000px; margin:0 auto; }
+  .card{ background:#fff; border:3px solid var(--ink); border-radius:16px; box-shadow:var(--card-shadow); padding:20px; }
   table{ width:100%; border-collapse:collapse; background:#fff; border:3px solid var(--ink); border-radius:14px; overflow:hidden; }
-  th,td{ padding:12px 14px; text-align:left; border-bottom:1px solid #E4DFD0; }
-  th{ font-family:'Baloo 2',cursive; background:var(--ink); color:#fff; }
+  th,td{ padding:10px 12px; text-align:left; border-bottom:1px solid #E4DFD0; font-size:14px; }
+  th{ font-family:'Baloo 2',cursive; background:var(--ink); color:#fff; font-size:13px; }
   tr:last-child td{ border-bottom:none; }
-  .level-pill{ font-family:'DM Mono',monospace; background:#F2A559; padding:3px 10px; border-radius:12px; font-size:13px; }
+  .level-pill{ font-family:'DM Mono',monospace; background:#F2A559; padding:3px 10px; border-radius:12px; font-size:13px; white-space:nowrap; }
   .done-pill{ background:#9BCB6B; }
   .time{ font-family:'DM Mono',monospace; }
   .meta{ text-align:center; font-size:13px; opacity:0.6; margin-top:16px; }
   #configWarn{ background:#FBD9DC; border:2px solid #C23B4C; border-radius:10px; padding:12px 16px; margin-bottom:18px; font-size:14px; }
+
+  .tabs{ display:flex; gap:10px; justify-content:center; margin-bottom:20px; flex-wrap:wrap; }
+  .tab-btn{
+    font-family:'Baloo 2',cursive; font-weight:700; font-size:15px;
+    border:3px solid var(--ink); border-radius:12px; padding:9px 18px;
+    background:#fff; color:var(--ink); cursor:pointer;
+  }
+  .tab-btn.active{ background:var(--ink); color:#fff; }
+  .tab-panel{ display:none; }
+  .tab-panel.active{ display:block; }
+
+  select.kidSelect{
+    font-family:'Nunito',sans-serif; font-weight:700; font-size:16px;
+    padding:10px 14px; border-radius:12px; border:3px solid var(--ink);
+    background:#fff; color:var(--ink); display:block; margin:0 auto 20px;
+    max-width:320px; width:100%;
+  }
+  .kid-grid{ display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-bottom:24px; }
+  @media (max-width:640px){ .kid-grid{ grid-template-columns:repeat(2,1fr); } }
+  .kid-lvl{
+    border:3px solid var(--ink); border-radius:12px; padding:10px; min-height:76px;
+    display:flex; flex-direction:column; justify-content:space-between;
+  }
+  .kid-lvl .num{ font-family:'Baloo 2',cursive; font-weight:800; font-size:17px; }
+  .kid-lvl .stat{ font-family:'DM Mono',monospace; font-size:11px; }
+  .kid-stats-row{ display:flex; justify-content:center; gap:26px; margin:10px 0 22px; flex-wrap:wrap; }
+  .kid-stat{ text-align:center; }
+  .kid-stat .n{ font-family:'Baloo 2',cursive; font-size:24px; }
+  .kid-stat .l{ font-size:11px; text-transform:uppercase; opacity:0.7; letter-spacing:0.5px; }
+
+  input.filterInput{
+    font-family:'Nunito',sans-serif; font-size:15px; padding:9px 14px;
+    border-radius:10px; border:3px solid var(--ink); width:100%; max-width:280px;
+    margin-bottom:14px; display:block;
+  }
 </style>
 </head>
 <body>
 <div class="wrap">
-  <h1>Times Tables — Live Dashboard</h1>
+  <h1>Times Tables — Dashboard</h1>
   <p class="sub">Auto-refreshes every 15 seconds</p>
   <div id="configWarn" style="display:none;">
     Set <code>APPS_SCRIPT_URL</code> at the top of this file's script to your deployed Apps Script Web App URL.
   </div>
-  <table>
-    <thead><tr><th>Kid</th><th>Status</th><th>Progress</th><th>Time so far</th><th>Points so far</th><th>Best (time/pts)</th><th>Last active</th></tr></thead>
-    <tbody id="rows"><tr><td colspan="7" style="text-align:center;opacity:0.6;">Loading…</td></tr></tbody>
-  </table>
+
+  <div class="tabs">
+    <button class="tab-btn active" data-tab="overview">All kids</button>
+    <button class="tab-btn" data-tab="bykid">One kid</button>
+    <button class="tab-btn" data-tab="log">Full log</button>
+  </div>
+
+  <!-- OVERVIEW: every kid at a glance -->
+  <div class="tab-panel active" id="panel-overview">
+    <table>
+      <thead><tr><th>Kid</th><th>Status</th><th>Progress</th><th>Time so far</th><th>Points so far</th><th>Best (time/pts)</th><th>Last active</th></tr></thead>
+      <tbody id="overviewRows"><tr><td colspan="7" style="text-align:center;opacity:0.6;">Loading…</td></tr></tbody>
+    </table>
+  </div>
+
+  <!-- BY KID: pick one kid, see their level-by-level breakdown -->
+  <div class="tab-panel" id="panel-bykid">
+    <select class="kidSelect" id="kidSelect"><option>Loading…</option></select>
+    <div id="kidDetail"></div>
+  </div>
+
+  <!-- FULL LOG: every raw event -->
+  <div class="tab-panel" id="panel-log">
+    <input type="text" class="filterInput" id="logFilter" placeholder="Filter by kid name…">
+    <table>
+      <thead><tr><th>When</th><th>Kid</th><th>Event</th><th>Level</th><th>Time</th><th>Mistakes</th><th>Points</th></tr></thead>
+      <tbody id="logRows"><tr><td colspan="7" style="text-align:center;opacity:0.6;">Loading…</td></tr></tbody>
+    </table>
+  </div>
+
   <div class="meta" id="meta"></div>
 </div>
 
@@ -50,32 +113,72 @@
 // Paste the same Apps Script Web App URL used in index.html
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw_hIjUHC78Rou2Sf9QTKrZCc0O-2kuav6YYvNcZGdb0ogG8Bx1CuO284BjwIr3FenB/exec";
 const TOTAL_LEVELS = 20;
+const QUESTIONS_PER_LEVEL = 30;
+
+// Same level metadata as the quiz app, trimmed to what the dashboard needs
+const LEVELS = [
+  {n:1,label:"1x table",color:"#CBD96B"},{n:2,label:"2x table",color:"#6EC6E8"},
+  {n:3,label:"10x table",color:"#F2A559"},{n:4,label:"5x table",color:"#B79FD1"},
+  {n:5,label:"3x table",color:"#F2A6C4"},{n:6,label:"4x table",color:"#F2A559"},
+  {n:7,label:"11x table",color:"#B79FD1"},{n:8,label:"9x table",color:"#F2A6C4"},
+  {n:9,label:"6x table",color:"#9BCB6B"},{n:10,label:"12x table",color:"#9BCB6B"},
+  {n:11,label:"7x table",color:"#F5D949"},{n:12,label:"8x table",color:"#6EC6E8"},
+  {n:13,label:"Mix: easy 4",color:"#8EC6D9"},{n:14,label:"Mix: 3,4,11,12",color:"#D9A5D6"},
+  {n:15,label:"Mix: 6 & 9",color:"#A9D98E"},{n:16,label:"Mix: 7 & 8",color:"#F2C15C"},
+  {n:17,label:"Mix: 10 tables",color:"#E88A6B"},{n:18,label:"All 12 tables",color:"#5B7FE0"},
+  {n:19,label:"All 12, round 2",color:"#E0527F"},{n:20,label:"Final Boss",color:"#2E2E52"},
+];
 
 function fmtTime(sec){
-  if(sec==null || isNaN(sec)) return "--:--";
+  if(sec==null || sec==="" || isNaN(sec)) return "--:--";
   const m = Math.floor(sec/60), s = (sec%60).toFixed(1);
   return `${m}:${s.padStart(4,"0")}`;
 }
+function textColorFor(hex){
+  const r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16);
+  const luminance = (0.299*r + 0.587*g + 0.114*b) / 255;
+  return luminance < 0.5 ? "#FBF7EE" : "#2E2E52";
+}
+
+let allRows = [];
 
 async function loadData(){
   if(!APPS_SCRIPT_URL){
     document.getElementById("configWarn").style.display="block";
-    document.getElementById("rows").innerHTML = `<tr><td colspan="7" style="text-align:center;opacity:0.6;">No Apps Script URL configured yet.</td></tr>`;
+    ["overviewRows","logRows"].forEach(id=>{
+      document.getElementById(id).innerHTML = `<tr><td colspan="7" style="text-align:center;opacity:0.6;">No Apps Script URL configured yet.</td></tr>`;
+    });
     return;
   }
   try{
     const res = await fetch(APPS_SCRIPT_URL + "?action=log");
-    const rows = await res.json(); // array of {name,event,level,levelTimeSec,totalElapsedSec,timestamp,...}
-    renderTable(rows);
+    allRows = await res.json();
+    renderOverview();
+    renderKidSelect();
+    renderLog();
+    document.getElementById("meta").textContent = `updated ${new Date().toLocaleTimeString()}`;
   }catch(e){
-    document.getElementById("rows").innerHTML = `<tr><td colspan="7" style="text-align:center;opacity:0.6;">Couldn't load data — check the Apps Script URL and that it's deployed as "Anyone with the link".</td></tr>`;
+    ["overviewRows","logRows"].forEach(id=>{
+      document.getElementById(id).innerHTML = `<tr><td colspan="7" style="text-align:center;opacity:0.6;">Couldn't load data — check the Apps Script URL and that it's deployed as "Anyone with the link".</td></tr>`;
+    });
   }
 }
 
-function renderTable(rows){
-  // group by name, take latest event + best all_complete time/points
+/* ---------- TAB SWITCHING ---------- */
+document.querySelectorAll(".tab-btn").forEach(btn=>{
+  btn.addEventListener("click", ()=>{
+    document.querySelectorAll(".tab-btn").forEach(b=>b.classList.remove("active"));
+    document.querySelectorAll(".tab-panel").forEach(p=>p.classList.remove("active"));
+    btn.classList.add("active");
+    document.getElementById("panel-"+btn.dataset.tab).classList.add("active");
+  });
+});
+
+/* ---------- OVERVIEW: all kids ---------- */
+function renderOverview(){
   const byName = {};
-  rows.forEach(r=>{
+  allRows.forEach(r=>{
+    if(!r.name) return;
     if(!byName[r.name]) byName[r.name] = { latest:null, bestTime:null, bestPoints:null };
     const bucket = byName[r.name];
     if(!bucket.latest || new Date(r.timestamp) > new Date(bucket.latest.timestamp)) bucket.latest = r;
@@ -86,27 +189,108 @@ function renderTable(rows){
   });
   const names = Object.keys(byName).sort();
   if(names.length===0){
-    document.getElementById("rows").innerHTML = `<tr><td colspan="7" style="text-align:center;opacity:0.6;">No sessions logged yet.</td></tr>`;
+    document.getElementById("overviewRows").innerHTML = `<tr><td colspan="7" style="text-align:center;opacity:0.6;">No sessions logged yet.</td></tr>`;
     return;
   }
-  document.getElementById("rows").innerHTML = names.map(name=>{
+  document.getElementById("overviewRows").innerHTML = names.map(name=>{
     const {latest,bestTime,bestPoints} = byName[name];
     const isDone = latest.event === "all_complete";
     const levelDisplay = isDone ? "20/20" : `level ${latest.level||"–"}`;
-    const timeSoFar = latest.totalTimeSec;
-    const pointsSoFar = latest.totalPoints;
     return `<tr>
       <td>${name}</td>
       <td><span class="level-pill ${isDone?'done-pill':''}">${isDone?'Finished! 🏆':'In progress'}</span></td>
       <td>${levelDisplay}</td>
-      <td class="time">${fmtTime(timeSoFar)}</td>
-      <td>⭐ ${pointsSoFar!=null && pointsSoFar!=="" ? pointsSoFar : 0}</td>
+      <td class="time">${fmtTime(latest.totalTimeSec)}</td>
+      <td>⭐ ${latest.totalPoints!=null && latest.totalPoints!=="" ? latest.totalPoints : 0}</td>
       <td class="time">${bestTime!=null ? fmtTime(bestTime)+" / "+bestPoints+"pts" : "—"}</td>
       <td>${new Date(latest.timestamp).toLocaleString()}</td>
     </tr>`;
   }).join("");
-  document.getElementById("meta").textContent = `${names.length} kid(s) with activity · updated ${new Date().toLocaleTimeString()}`;
 }
+
+/* ---------- BY KID: one kid's level-by-level breakdown ---------- */
+function renderKidSelect(){
+  const sel = document.getElementById("kidSelect");
+  const names = [...new Set(allRows.map(r=>r.name).filter(Boolean))].sort();
+  const prevValue = sel.value;
+  sel.innerHTML = `<option value="">— choose a kid —</option>` + names.map(n=>`<option value="${n}">${n}</option>`).join("");
+  if(names.includes(prevValue)) sel.value = prevValue;
+  sel.onchange = ()=> renderKidDetail(sel.value);
+  if(!sel.value) document.getElementById("kidDetail").innerHTML = "";
+}
+
+function renderKidDetail(name){
+  const detail = document.getElementById("kidDetail");
+  if(!name){ detail.innerHTML = ""; return; }
+
+  const kidRows = allRows.filter(r=>r.name===name);
+  const levelBestTimes = {}, levelPoints = {};
+  kidRows.forEach(r=>{
+    if(r.event!=="level_complete" && r.event!=="all_complete") return;
+    if(r.level==null || r.level==="") return;
+    if(r.levelTimeSec!=null && r.levelTimeSec!=="" && (levelBestTimes[r.level]==null || r.levelTimeSec<levelBestTimes[r.level])) levelBestTimes[r.level]=r.levelTimeSec;
+    if(r.levelPoints!=null && r.levelPoints!=="" && (levelPoints[r.level]==null || r.levelPoints>levelPoints[r.level])) levelPoints[r.level]=r.levelPoints;
+  });
+  const completedCount = Object.keys(levelBestTimes).length;
+  const totalTime = Object.values(levelBestTimes).reduce((a,b)=>a+b,0);
+  const totalPoints = Object.values(levelPoints).reduce((a,b)=>a+b,0);
+
+  const cards = LEVELS.map(lv=>{
+    const done = levelBestTimes[lv.n]!=null;
+    const textColor = textColorFor(lv.color);
+    return `<div class="kid-lvl" style="background:${lv.color};color:${textColor};">
+      <div class="num">${lv.n}</div>
+      <div class="stat">${done ? fmtTime(levelBestTimes[lv.n])+" · "+levelPoints[lv.n]+"pts" : "not played"}</div>
+    </div>`;
+  }).join("");
+
+  const recent = kidRows.slice().sort((a,b)=> new Date(b.timestamp)-new Date(a.timestamp)).slice(0,15);
+  const recentRows = recent.map(r=>`<tr>
+      <td>${new Date(r.timestamp).toLocaleString()}</td>
+      <td>${r.event||""}</td>
+      <td>${r.level||"–"}</td>
+      <td class="time">${fmtTime(r.levelTimeSec)}</td>
+      <td>${r.mistakes!=null && r.mistakes!=="" ? r.mistakes : "–"}</td>
+      <td>${r.levelPoints!=null && r.levelPoints!=="" ? r.levelPoints : "–"}</td>
+    </tr>`).join("");
+
+  detail.innerHTML = `
+    <div class="kid-stats-row">
+      <div class="kid-stat"><div class="n">${completedCount}/${TOTAL_LEVELS}</div><div class="l">levels played</div></div>
+      <div class="kid-stat"><div class="n">${fmtTime(totalTime)}</div><div class="l">total time</div></div>
+      <div class="kid-stat"><div class="n">⭐ ${totalPoints}</div><div class="l">total points</div></div>
+    </div>
+    <div class="kid-grid">${cards}</div>
+    <h2>Recent activity</h2>
+    <table>
+      <thead><tr><th>When</th><th>Event</th><th>Level</th><th>Time</th><th>Mistakes</th><th>Points</th></tr></thead>
+      <tbody>${recentRows || `<tr><td colspan="6" style="text-align:center;opacity:0.6;">No activity yet.</td></tr>`}</tbody>
+    </table>`;
+}
+
+/* ---------- FULL LOG: every raw event ---------- */
+function renderLog(){
+  const filter = (document.getElementById("logFilter").value || "").toLowerCase();
+  const rows = allRows
+    .filter(r=> !filter || (r.name||"").toLowerCase().includes(filter))
+    .slice()
+    .sort((a,b)=> new Date(b.timestamp)-new Date(a.timestamp));
+
+  if(rows.length===0){
+    document.getElementById("logRows").innerHTML = `<tr><td colspan="7" style="text-align:center;opacity:0.6;">No matching activity.</td></tr>`;
+    return;
+  }
+  document.getElementById("logRows").innerHTML = rows.map(r=>`<tr>
+      <td>${new Date(r.timestamp).toLocaleString()}</td>
+      <td>${r.name||""}</td>
+      <td>${r.event||""}</td>
+      <td>${r.level||"–"}</td>
+      <td class="time">${fmtTime(r.levelTimeSec)}</td>
+      <td>${r.mistakes!=null && r.mistakes!=="" ? r.mistakes : "–"}</td>
+      <td>${r.levelPoints!=null && r.levelPoints!=="" ? r.levelPoints : "–"}</td>
+    </tr>`).join("");
+}
+document.getElementById("logFilter").addEventListener("input", renderLog);
 
 loadData();
 setInterval(loadData, 15000);

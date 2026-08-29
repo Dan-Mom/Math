@@ -100,15 +100,34 @@
   .timer{ font-family:'DM Mono',monospace; font-size:22px; font-weight:500; }
   .progress-bar{ height:12px; border:2px solid var(--ink); border-radius:8px; background:#fff; overflow:hidden; margin-bottom:22px; }
   .progress-fill{ height:100%; background:var(--ink); transition:width .25s; }
-  .quiz-card{ padding:44px 28px; text-align:center; }
-  .question{ font-family:'Baloo 2',cursive; font-size:clamp(40px,9vw,64px); margin-bottom:26px; }
-  .quiz-card input{
-    font-family:'DM Mono',monospace; font-size:32px; text-align:center;
-    width:160px; padding:10px; border-radius:12px; border:3px solid var(--ink);
+  .quiz-card{ padding:28px; }
+  .quiz-layout{ display:flex; gap:22px; align-items:stretch; }
+  .numpad-panel{ flex:0 0 230px; }
+  .question-panel{ flex:1; text-align:center; display:flex; flex-direction:column; justify-content:center; }
+  @media (max-width:680px){
+    .quiz-layout{ flex-direction:column-reverse; }
+    .numpad-panel{ flex:none; width:100%; max-width:320px; margin:0 auto; }
   }
-  .quiz-card input.correct{ background:#DDF2C8; border-color:#5B8A2B; }
-  .quiz-card input.wrong{ background:#FBD9DC; border-color:#C23B4C; }
-  .feedback{ min-height:26px; margin-top:14px; font-weight:800; font-family:'Baloo 2',cursive; }
+  .numpad{ display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
+  .numpad button{
+    font-family:'DM Mono',monospace; font-size:26px; font-weight:700;
+    padding:16px 0; border-radius:14px; border:3px solid var(--ink);
+    background:#fff; color:var(--ink); cursor:pointer;
+    box-shadow:0 3px 0 rgba(46,46,82,0.25);
+  }
+  .numpad button:active{ transform:translateY(2px); box-shadow:0 1px 0 rgba(46,46,82,0.25); }
+  .numpad button.clear{ background:#FBD9DC; font-size:16px; }
+  .numpad button.back{ background:#FFE8B8; font-size:20px; }
+  .question{ font-family:'Baloo 2',cursive; font-size:clamp(38px,7vw,58px); margin-bottom:20px; }
+  .answer-display{
+    font-family:'DM Mono',monospace; font-size:40px; font-weight:500; letter-spacing:6px;
+    min-height:70px; border:3px solid var(--ink); border-radius:14px; background:#fff;
+    display:flex; align-items:center; justify-content:center; margin:0 auto; max-width:220px;
+  }
+  .answer-display.empty{ color:#B8B2A0; }
+  .answer-display.correct{ background:#DDF2C8; border-color:#5B8A2B; }
+  .answer-display.wrong{ background:#FBD9DC; border-color:#C23B4C; }
+  .feedback{ min-height:26px; margin-top:16px; font-weight:800; font-family:'Baloo 2',cursive; }
   .feedback.ok{ color:#3E7A1F; }
   .feedback.no{ color:#B23246; }
   .redo-note{ font-size:13px; opacity:0.7; margin-top:10px; }
@@ -146,7 +165,7 @@ const KID_NAMES = [];
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw_hIjUHC78Rou2Sf9QTKrZCc0O-2kuav6YYvNcZGdb0ogG8Bx1CuO284BjwIr3FenB/exec";
 
 /* =========================================================
-   LEVEL DEFINITIONS — 20 levels x 50 questions = 1000
+   LEVEL DEFINITIONS — 20 levels x 30 questions = 600
    Easy single tables first, building to hard tables,
    then mixed-review levels at the end.
    ========================================================= */
@@ -172,7 +191,7 @@ const LEVELS = [
   {n:19, tables:[1,2,3,4,5,6,7,8,9,10,11,12], label:"All 12, round 2", color:"#E0527F"},
   {n:20, tables:[1,2,3,4,5,6,7,8,9,10,11,12], label:"Final Boss",     color:"#2E2E52"},
 ];
-const QUESTIONS_PER_LEVEL = 50;
+const QUESTIONS_PER_LEVEL = 30;
 const TOTAL_LEVELS = LEVELS.length;
 
 /* =========================================================
@@ -197,7 +216,7 @@ function saveKidRecord(name, rec){
   saveAllProgress(all);
 }
 
-let session = { name:null, rec:null, level:null, queue:[], idx:0, mistakesThisLevel:0, pointsThisLevel:0, startTs:0, timerHandle:null };
+let session = { name:null, rec:null, level:null, queue:[], missedQueue:[], round:1, roundTotal:0, currentAnswer:"", mistakesThisLevel:0, pointsThisLevel:0, startTs:0, timerHandle:null };
 
 /* =========================================================
    SYNC TO GOOGLE SHEET (best-effort, never blocks the UI)
@@ -235,24 +254,45 @@ function makeLevelQueue(level){
 }
 
 /* =========================================================
-   RENDER: HOME (name list lives in the Google Sheet "Names" tab)
+   RENDER: HOME (name list lives in the Google Sheet "Names" tab,
+   plus a local backup so an added name never disappears)
    ========================================================= */
 let rosterCache = null; // array of names once loaded
 
+const LOCAL_ROSTER_KEY = "mathfacts_local_roster_v1";
+function loadLocalRoster(){
+  try{ return JSON.parse(localStorage.getItem(LOCAL_ROSTER_KEY)) || []; }catch(e){ return []; }
+}
+function saveLocalRoster(list){ localStorage.setItem(LOCAL_ROSTER_KEY, JSON.stringify(list)); }
+function addToLocalRoster(name){
+  const list = loadLocalRoster();
+  if(!list.some(n=>n.toLowerCase()===name.toLowerCase())){
+    list.push(name);
+    saveLocalRoster(list);
+  }
+}
+
+function mergeNameLists(...lists){
+  const merged = [];
+  lists.forEach(list=>{
+    list.forEach(n=>{
+      if(!merged.some(m=>m.toLowerCase()===n.toLowerCase())) merged.push(n);
+    });
+  });
+  return merged.sort((a,b)=>a.localeCompare(b));
+}
+
 async function fetchRoster(){
-  if(!APPS_SCRIPT_URL) return KID_NAMES.slice();
+  const local = loadLocalRoster();
+  if(!APPS_SCRIPT_URL) return mergeNameLists(local, KID_NAMES);
   try{
     const res = await fetch(APPS_SCRIPT_URL + "?action=names");
     const names = await res.json();
-    if(Array.isArray(names) && names.length){
-      // merge with fallback seed list, de-duped, so the list never looks empty
-      const merged = names.slice();
-      KID_NAMES.forEach(n=>{ if(!merged.some(m=>m.toLowerCase()===n.toLowerCase())) merged.push(n); });
-      return merged.sort((a,b)=>a.localeCompare(b));
-    }
-    return KID_NAMES.slice();
+    const remote = Array.isArray(names) ? names : [];
+    return mergeNameLists(remote, local, KID_NAMES);
   }catch(e){
-    return KID_NAMES.slice();
+    // Sheet unreachable right now — still show names added on this device
+    return mergeNameLists(local, KID_NAMES);
   }
 }
 
@@ -317,6 +357,7 @@ async function renderHome(){
     if(!dup){
       rosterCache.push(finalName);
       rosterCache.sort((a,b)=>a.localeCompare(b));
+      addToLocalRoster(finalName);
       syncEvent({ name:finalName, event:"add_name", timestamp:new Date().toISOString() });
     }
     renderNameOptions(sel, rosterCache, finalName);
@@ -414,7 +455,10 @@ function startLevel(n){
   const level = LEVELS.find(l=>l.n===n);
   session.level = level;
   session.queue = makeLevelQueue(level);
-  session.idx = 0;
+  session.missedQueue = [];
+  session.round = 1;
+  session.roundTotal = session.queue.length;
+  session.currentAnswer = "";
   session.mistakesThisLevel = 0;
   session.pointsThisLevel = 0;
   session.startTs = performance.now();
@@ -426,13 +470,23 @@ function updateTimerDisplay(){
   const el = document.getElementById("timerVal");
   if(el) el.textContent = fmtTime(elapsedSec());
 }
+function updateAnswerDisplay(){
+  const disp = document.getElementById("answerDisplay");
+  const checkBtn = document.getElementById("submitBtn");
+  if(!disp) return;
+  disp.textContent = session.currentAnswer || "?";
+  disp.classList.toggle("empty", session.currentAnswer==="");
+  if(checkBtn) checkBtn.disabled = session.currentAnswer === "";
+}
 function renderQuiz(){
   const app = document.getElementById("app");
   const lv = session.level;
-  const total = QUESTIONS_PER_LEVEL;
+  const total = session.roundTotal;
   const answered = total - session.queue.length;
   const pct = Math.min(100, Math.round((answered/total)*100));
   const item = session.queue[0];
+  const roundNote = session.round > 1 ? `Round ${session.round} — practicing what you missed · ` : "";
+  const numpadButtons = [7,8,9,4,5,6,1,2,3].map(d=>`<button data-digit="${d}">${d}</button>`).join("");
   app.innerHTML = `
     <div class="quiz-top">
       <div class="lvl-tag" style="background:${lv.color}; color:${textColorFor(lv.color)};">Level ${lv.n} · ${lv.label} · ${lv.n*10} pts/answer</div>
@@ -440,28 +494,53 @@ function renderQuiz(){
     </div>
     <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
     <div class="card quiz-card">
-      <div class="question">${item.a} × ${item.b} = ?</div>
-      <input type="number" id="answerInput" autofocus autocomplete="off" inputmode="numeric" pattern="[0-9]*" enterkeyhint="done">
-      <div class="row" style="margin-top:14px;">
-        <button class="btn" id="submitBtn">Check ✓</button>
+      <div class="quiz-layout">
+        <div class="numpad-panel">
+          <div class="numpad">
+            ${numpadButtons}
+            <button class="clear" data-action="clear">Clear</button>
+            <button data-digit="0">0</button>
+            <button class="back" data-action="back">⌫</button>
+          </div>
+        </div>
+        <div class="question-panel">
+          <div class="question">${item.a} × ${item.b} = ?</div>
+          <div class="answer-display empty" id="answerDisplay">?</div>
+          <div class="row" style="margin-top:16px;">
+            <button class="btn" id="submitBtn" disabled>Check ✓</button>
+          </div>
+          <div class="feedback" id="feedback"></div>
+          <div class="redo-note">${roundNote}${answered} of ${total} correct this round</div>
+        </div>
       </div>
-      <div class="feedback" id="feedback"></div>
-      <div class="redo-note">${answered} of ${total} correct so far ${session.mistakesThisLevel>0 ? "· missed ones come back around" : ""}</div>
     </div>`;
-  const input = document.getElementById("answerInput");
-  input.focus();
-  input.addEventListener("keydown", (e)=>{ if(e.key==="Enter") submitAnswer(); });
+
+  document.querySelectorAll(".numpad button[data-digit]").forEach(btn=>{
+    btn.addEventListener("click", ()=>{
+      if(session.currentAnswer.length >= 3) return;
+      session.currentAnswer += btn.dataset.digit;
+      updateAnswerDisplay();
+    });
+  });
+  document.querySelector('.numpad button[data-action="clear"]').addEventListener("click", ()=>{
+    session.currentAnswer = "";
+    updateAnswerDisplay();
+  });
+  document.querySelector('.numpad button[data-action="back"]').addEventListener("click", ()=>{
+    session.currentAnswer = session.currentAnswer.slice(0,-1);
+    updateAnswerDisplay();
+  });
   document.getElementById("submitBtn").addEventListener("click", submitAnswer);
 }
 function submitAnswer(){
-  const input = document.getElementById("answerInput");
-  const submitBtn = document.getElementById("submitBtn");
-  if(input.disabled) return; // already answered, waiting to advance
-  const val = parseInt(input.value,10);
+  const disp = document.getElementById("answerDisplay");
+  const checkBtn = document.getElementById("submitBtn");
+  if(checkBtn.disabled) return;
+  const val = parseInt(session.currentAnswer, 10);
   const item = session.queue[0];
   const fb = document.getElementById("feedback");
   if(val === item.answer){
-    input.classList.add("correct");
+    disp.classList.add("correct");
     if(item.firstTry){
       session.pointsThisLevel += session.level.n * 10;
       fb.textContent = `Correct! +${session.level.n*10} pts`; fb.className="feedback ok";
@@ -470,24 +549,49 @@ function submitAnswer(){
     }
     session.queue.shift();
   } else {
-    input.classList.add("wrong");
+    disp.classList.add("wrong");
     fb.textContent = `Not quite — it's ${item.answer}`; fb.className="feedback no";
     session.mistakesThisLevel++;
     item.firstTry = false;
     session.queue.shift();
-    // put it back a few spots later so it's not immediately repeated
-    const reinsertAt = Math.min(session.queue.length, 4);
-    session.queue.splice(reinsertAt, 0, item);
+    session.missedQueue.push(item);
   }
-  input.disabled = true;
-  submitBtn.disabled = true;
+  checkBtn.disabled = true;
+  document.querySelectorAll(".numpad button").forEach(b=> b.disabled = true);
+  session.currentAnswer = "";
   setTimeout(()=>{
     if(session.queue.length===0){
-      finishLevel();
+      if(session.missedQueue.length > 0){
+        renderRoundReview();
+      } else {
+        finishLevel();
+      }
     } else {
       renderQuiz();
     }
   }, 550);
+}
+function renderRoundReview(){
+  const app = document.getElementById("app");
+  const missedCount = session.missedQueue.length;
+  app.innerHTML = `
+    <div class="card result-card">
+      <h2>Round ${session.round} done! 👀</h2>
+      <p>You missed <strong>${missedCount}</strong> question${missedCount===1?"":"s"} this round.</p>
+      <p>Want to try ${missedCount===1?"it":"them"} again until you get ${missedCount===1?"it":"them all"} right?</p>
+      <div class="row">
+        <button class="btn" id="retryYes">Yes, try again</button>
+        <button class="btn secondary" id="retryNo">No, I'm done</button>
+      </div>
+    </div>`;
+  document.getElementById("retryYes").addEventListener("click", ()=>{
+    session.queue = session.missedQueue;
+    session.missedQueue = [];
+    session.roundTotal = session.queue.length;
+    session.round++;
+    renderQuiz();
+  });
+  document.getElementById("retryNo").addEventListener("click", finishLevel);
 }
 function finishLevel(){
   clearInterval(session.timerHandle);
@@ -552,7 +656,7 @@ function renderAllComplete(totalTimeSoFar, totalPointsSoFar){
   const rec = session.rec;
   app.innerHTML = `
     <div class="card result-card">
-      <h2>All 1000 questions done, ${session.name}! 🏆</h2>
+      <h2>All 600 questions done, ${session.name}! 🏆</h2>
       <div class="big">${fmtTime(totalTimeSoFar)}</div>
       <div class="stat-row">
         <div class="stat"><div class="n">⭐ ${totalPointsSoFar}</div><div class="l">total points</div></div>
