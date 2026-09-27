@@ -212,6 +212,10 @@ svg.star{width:34px;height:34px}svg.star.off{filter:grayscale(1) brightness(1.6)
 .tlogo{flex:0 0 auto}.tsub{display:inline-block;background:var(--terra2);color:#fff;font:800 clamp(14px,2.4vw,20px) var(--font);padding:2px 16px;border-radius:14px;margin-bottom:6px}
 .tcity{max-width:760px}.trow{display:flex;gap:12px;justify-content:center}.btn.big{min-height:76px;min-width:240px;font-size:30px;border-radius:26px}
 .tcoach{max-width:640px;margin-top:0}
+.whoRow{display:flex;flex-wrap:wrap;gap:14px;justify-content:center;margin:12px 0}
+.who{min-width:150px;min-height:128px;border:0;border-radius:24px;background:#fff;color:var(--purple2);font:800 22px var(--font);box-shadow:0 6px 0 rgba(61,37,102,.35);padding:10px 18px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;cursor:pointer}
+.who .wi{font-size:52px;line-height:1}.who small{font:700 15px var(--font);color:#6b5a86}.who.on{outline:5px solid var(--gold)}
+.whoNote{max-width:560px;margin:4px auto 0;font:600 15px var(--font);color:#fff;text-align:center}
 .wtabs{flex:0 0 auto;display:flex;gap:8px;margin:10px 0 6px;flex-wrap:wrap}
 .wbanner{flex:0 0 auto;display:flex;flex-direction:column;background:#fff;border:4px solid;border-radius:18px;padding:4px 14px;margin-bottom:8px;font:600 15px var(--font)}.wbanner b{font:900 clamp(20px,3vw,26px) var(--serif);color:var(--purple2)}
 .path{flex:0 0 auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(112px,1fr));gap:10px;margin-bottom:8px}
@@ -268,6 +272,7 @@ svg.star{width:34px;height:34px}svg.star.off{filter:grayscale(1) brightness(1.6)
   </header>
   <main id="stage">
     <section class="screen" id="s-title"></section>
+    <section class="screen" id="s-who"></section>
     <section class="screen" id="s-map"></section>
     <section class="screen" id="s-collect"></section>
     <section class="screen" id="s-build"></section>
@@ -286,7 +291,7 @@ svg.star{width:34px;height:34px}svg.star.off{filter:grayscale(1) brightness(1.6)
 
   LearningHook.emit(name, data)  -> builds and delivers ONE event, never throws into the game:
     { schema:1, lesson_id, event:name, ts:"2026-09-26T18:04:05Z", session:"<random per page load>",
-      profile:"<anonymous id in localStorage lp_profile_v1, or PE_LEARNING_CONTEXT.profile>", data:{...,lang:"en"} }
+      profile:"<anonymous id in localStorage lp_profile_v1:<slot>, or PE_LEARNING_CONTEXT.profile>", data:{...,lang:"en"} }
   Delivery (each step in its own try/catch):
     1. appended to localStorage `lp_events_v1` (JSON array, newest last, max 500, oldest dropped)
     2. window.PE_LEARNING_HOOK(event) if the host defined that function
@@ -302,13 +307,40 @@ svg.star{width:34px;height:34px}svg.star.off{filter:grayscale(1) brightness(1.6)
     hint_used          {unit, activity}                        each time the mascot hint / reveal / glow help fires
     session_end        {seconds}                               on pagehide / tab hidden, once per hide (seconds visible since load or last return)
 ==================================================================================================*/
+/*==================================================================================================
+  Who is playing?  -  one save per child (SYSTEM-CONTRACT section 4.1: "save keys carry the profile")
+  Four built-in animal slots, no names and no typing. Each slot has its OWN save (rnk_state:<slot>) and its OWN anonymous
+  event id (lp_profile_v1:<slot>), so brothers and sisters on one iPad never overwrite each other and the parent
+  dashboard can tell them apart. If a host app sets window.PE_LEARNING_CONTEXT.profile, that profile IS the slot (no picker).
+  Old single saves (rnk_state) are copied once to the Lion slot (the old file is left untouched).
+  Launch rule: 2 or more children have progress -> always ask; otherwise go straight to the only / last player.
+==================================================================================================*/
+const Who=(function(){
+  const CUR='rnk_who',SLOTS=[{id:'lion',icon:'\uD83E\uDD81',name:'Lion'},{id:'fox',icon:'\uD83E\uDD8A',name:'Fox'},{id:'panda',icon:'\uD83D\uDC3C',name:'Panda'},{id:'owl',icon:'\uD83E\uDD89',name:'Owl'}];
+  let mem=null;
+  const hostProfile=()=>{try{const c=window.PE_LEARNING_CONTEXT;return c&&c.profile?String(c.profile).replace(/[^A-Za-z0-9_.-]/g,'_').slice(0,40):null}catch(e){return null}};
+  const valid=id=>SLOTS.some(s=>s.id===id);
+  function get(){const hp=hostProfile();if(hp)return hp;if(mem&&valid(mem))return mem;
+    try{const v=localStorage.getItem(CUR);if(valid(v)){mem=v;return v}}catch(e){}return null}
+  function set(id){if(!valid(id))return;mem=id;try{localStorage.setItem(CUR,id)}catch(e){}}
+  const slot=id=>SLOTS.filter(s=>s.id===id)[0]||null;
+  /* one-time move of the old single save to the Lion slot; `st` is any storage-like object (tests pass an in-memory one) */
+  function migrate(st){st=st||localStorage;
+    try{if(st.getItem('rnk_legacy_moved')==='1')return false;let moved=false;const legacy=st.getItem('rnk_state');
+      if(legacy&&!st.getItem('rnk_state:lion')){st.setItem('rnk_state:lion',legacy);moved=true;st.setItem('rnk_legacy_copied','1');
+        const lp=st.getItem('lp_profile_v1');if(lp&&!st.getItem('lp_profile_v1:lion'))st.setItem('lp_profile_v1:lion',lp)}
+      st.setItem('rnk_legacy_moved','1');return moved}catch(e){return false}}
+  return{SLOTS,get,set,slot,migrate,hosted:()=>!!hostProfile(),needChooser:false,
+    icon(){const s=slot(get());return s?s.icon:''},name(){const s=slot(get());return s?s.name:''}};
+})();
 const LearningHook=(function(){
   const LESSON='math.g3.roman-numeral-kingdom',QK='lp_events_v1',PK='lp_profile_v1',SK='lp_started_v1',MAX=500;
   const rid=n=>{let s='';try{const a=new Uint8Array(n);crypto.getRandomValues(a);a.forEach(x=>s+=(x%36).toString(36))}catch(e){for(let i=0;i<n;i++)s+=Math.floor(Math.random()*36).toString(36)}return s};
-  const session=rid(8);let memProfile=null,memStarted={},segStart=Date.now(),ended=false;
+  const session=rid(8);let memProfile={},memStarted={},segStart=Date.now(),ended=false;
   const ctx=()=>{try{return(window.PE_LEARNING_CONTEXT&&typeof window.PE_LEARNING_CONTEXT==='object')?window.PE_LEARNING_CONTEXT:{}}catch(e){return{}}};
   function profile(){const c=ctx();if(c.profile)return String(c.profile);
-    try{let p=localStorage.getItem(PK);if(!p){p='p'+rid(10);localStorage.setItem(PK,p)}return p}catch(e){return memProfile||(memProfile='p'+rid(10))}}
+    const k=Who.get()?PK+':'+Who.get():PK;  /* one anonymous id per player slot */
+    try{let p=localStorage.getItem(k);if(!p){p='p'+rid(10);localStorage.setItem(k,p)}return p}catch(e){return memProfile[k]||(memProfile[k]='p'+rid(10))}}
   /* Bounded queue over a storage-like object {getItem,setItem,removeItem}. If writing (or reading) throws, it keeps a
      bounded in-memory queue (max MAX, oldest dropped, no duplicates) and peek() returns that combined ordered queue. */
   function makeQueue(store,key,max){let mem=[],failed=false;
@@ -332,7 +364,7 @@ const LearningHook=(function(){
     startOnce(){const k=SK+':'+LESSON+':'+profile();if(memStarted[k])return;memStarted[k]=1;
       try{if(localStorage.getItem(k))return;localStorage.setItem(k,'1')}catch(e){}emit('started',{})},
     /* time on the page: one session_end per hide */
-    hide(){if(ended)return;ended=true;emit('session_end',{seconds:Math.max(0,Math.round((Date.now()-segStart)/1000))})},
+    hide(){if(ended)return;ended=true;if(!Who.get())return;/* nobody has picked a player yet: no session to report */emit('session_end',{seconds:Math.max(0,Math.round((Date.now()-segStart)/1000))})},
     show(){ended=false;segStart=Date.now()}};
 })();
 document.addEventListener('visibilitychange',()=>{try{document.visibilityState==='hidden'?LearningHook.hide():LearningHook.show()}catch(e){}});
@@ -439,6 +471,14 @@ const SelfTest={
     const ev=LearningHook.make('activity_completed',{unit:'world1',activity:'block-builder',score:4,max:4,stars:3,attempts:4,hints:0});
     T(ev.schema===1&&ev.lesson_id==='math.g3.roman-numeral-kingdom'&&ev.event==='activity_completed','hook shape');
     T(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/.test(ev.ts),'hook ts');T(!!ev.session&&!!ev.profile,'hook ids');T(ev.data.lang==='en'&&!('level' in ev.data),'hook lang, no level');
+    // per-player saves: separate keys, the old save moves once to the Lion, start over touches only the current player
+    {const ps=(()=>{const d={};return{getItem:k=>(k in d?d[k]:null),setItem:(k,v)=>{d[k]=String(v)},removeItem:k=>{delete d[k]}}})();
+      ps.setItem('rnk_state','{"stars":5}');ps.setItem('lp_profile_v1','pabc');
+      T(Who.migrate(ps)===true&&ps.getItem('rnk_state:lion')==='{"stars":5}'&&ps.getItem('lp_profile_v1:lion')==='pabc','old save moves to the Lion slot');
+      ps.setItem('rnk_state:fox','{"stars":9}');
+      T(Who.migrate(ps)===false&&ps.getItem('rnk_state:fox')==='{"stars":9}'&&ps.getItem('rnk_state:lion')==='{"stars":5}','migration runs only once');
+      T(new Set(Who.SLOTS.map(x=>Store.keyFor(x.id))).size===Who.SLOTS.length&&Who.SLOTS.every(x=>Store.keyFor(x.id).indexOf('rnk_state:')===0),'one save key per player');
+      Store.wipe(ps,Store.keyFor('lion'));T(ps.getItem('rnk_state:lion')===null&&ps.getItem('rnk_state:fox')==='{"stars":9}','start over removes only that player');}
     // event queue, tested three ways; each reported as PASS / FAIL / SKIPPED (a skipped check is never counted as a pass)
     const Q={cap:'FAIL',nowrite:'FAIL',storage:'SKIPPED'};
     const memStore=()=>{const d={};return{getItem:k=>(k in d?d[k]:null),setItem:(k,v)=>{d[k]=String(v)},removeItem:k=>{delete d[k]}}};
@@ -476,11 +516,17 @@ const EventsView={show(){const q=LearningHook.peek();let d=$('#selftest');if(!d)
     $('pre',d).textContent=q.slice(-40).map(e=>JSON.stringify(e)).join('\n');return q}};
 window.EventsView=EventsView;window.LearningHook=LearningHook;
 window.addEventListener('hashchange',()=>{if(location.hash==='#selftest')SelfTest.show();else if(location.hash==='#events')EventsView.show()});
-/*== STAGE 3: state + localStorage (all keys start with rnk_) ==*/
+/*== STAGE 3: state + localStorage (all keys start with rnk_; the save is rnk_state:<player>) ==*/
 const Store={
-  KEY:'rnk_state',MUTE:'rnk_mute',
+  PREFIX:'rnk_state:',MUTE:'rnk_mute',
+  keyFor(id){return this.PREFIX+id},
+  key(){const w=Who.get();return w?this.keyFor(w):null},
+  /* what a slot's save holds, read defensively (used by the who-is-playing screen and the launch rule) */
+  summary(id){try{const o=JSON.parse(localStorage.getItem(this.keyFor(id))||'null');if(o&&typeof o==='object')return{stars:Math.max(0,+o.stars||0),done:o.nodes&&typeof o.nodes==='object'?Object.keys(o.nodes).length:0}}catch(e){}return{stars:0,done:0}},
+  has(id){const m=this.summary(id);return m.done>0||m.stars>0},
+  wipe(st,k){try{if(k)st.removeItem(k)}catch(e){}},
   def(){return{v:1,coins:0,stars:0,unlocked:1,nodes:{},hat:'none',hats:['none'],decos:[],seen:{},finale:false}},
-  load(){try{const j=localStorage.getItem(this.KEY);if(j){const o=JSON.parse(j);if(o&&typeof o==='object'&&!Array.isArray(o))return this.fix(Object.assign(this.def(),o))}}catch(e){}return this.def()},
+  load(){try{const k=this.key(),j=k&&localStorage.getItem(k);if(j){const o=JSON.parse(j);if(o&&typeof o==='object'&&!Array.isArray(o))return this.fix(Object.assign(this.def(),o))}}catch(e){}return this.def()},
   /* a saved value with the wrong shape (corrupt store) falls back to the default instead of crashing the map */
   fix(s){const d=this.def(),isObj=v=>v&&typeof v==='object'&&!Array.isArray(v),num=(v,lo,hi,dv)=>typeof v==='number'&&isFinite(v)?Math.min(hi,Math.max(lo,Math.floor(v))):dv;
     s.coins=num(s.coins,0,1e6,0);s.stars=num(s.stars,0,1e6,0);s.unlocked=num(s.unlocked,1,3,1);
@@ -488,16 +534,23 @@ const Store={
     const seen={};if(isObj(s.seen))Object.keys(s.seen).forEach(k=>{if(/^[1-3]\.[0-5]$/.test(k)&&s.seen[k])seen[k]=1});s.seen=seen;
     s.hats=Array.isArray(s.hats)?s.hats.filter(x=>typeof x==='string'):d.hats;s.decos=Array.isArray(s.decos)?s.decos.filter(x=>typeof x==='string'):[];
     if(typeof s.hat!=='string')s.hat='none';s.finale=s.finale===true;s.v=1;return s},
-  save(){try{localStorage.setItem(this.KEY,JSON.stringify(S))}catch(e){}},
+  save(){try{const k=this.key();if(k)localStorage.setItem(k,JSON.stringify(S))}catch(e){}},
   getMute(){try{return localStorage.getItem(this.MUTE)==='1'}catch(e){return false}},
   setMute(m){try{localStorage.setItem(this.MUTE,m?'1':'0')}catch(e){}},
-  reset(){try{Object.keys(localStorage).filter(k=>k.startsWith('rnk_')&&k!==this.MUTE).forEach(k=>localStorage.removeItem(k))}catch(e){}S=this.def();Game.refreshHud()}
+  /* start over = forget ONLY the current player's kingdom (never the other children, the sound setting or who is playing) */
+  reset(){this.wipe(localStorage,this.key());S=this.def();Game.refreshHud()}
 };
+/* which child is playing: move an old single save to the Lion slot once, then apply the launch rule */
+if(!Who.hosted()){const moved=Who.migrate();if(moved&&!Who.get())Who.set('lion');
+  const withData=Who.SLOTS.filter(x=>Store.has(x.id));
+  if(withData.length>=2)Who.needChooser=true;else if(!Who.get()){if(withData.length===1)Who.set(withData[0].id);else Who.needChooser=true}}
 let S=Store.load();
 
 /* Game bookkeeping: coins, stars, node completion (a node = one activity on the world path; id "w.i") */
 const Game={
   refreshHud(){$('#n-coins').textContent=S.coins;$('#n-stars').textContent=S.stars},
+  /* switch to another child's kingdom (their own save), then go to the title */
+  choosePlayer(id){Who.set(id);Who.needChooser=false;S=Store.load();Store.clean();this.refreshHud();Mascot.setHat(S.hat);LearningHook.startOnce();Screens.go('title')},
   addCoins(n){S.coins=Math.max(0,S.coins+n);this.refreshHud();this.bump('#p-coins');Store.save()},
   addStars(n){S.stars+=n;this.refreshHud();this.bump('#p-stars');Store.save()},
   bump(sel){const e=$(sel);e.classList.remove('bump');void e.offsetWidth;e.classList.add('bump')},
@@ -593,7 +646,8 @@ const DECOS={
   eagle:{name:'Golden Eagle',cost:40,x:1215}
 };
 /* saved hats / decorations must exist in the catalogue (Store.fix could not check: the catalogue is defined here) */
-S.hats=S.hats.filter(id=>HATS[id]);if(!S.hats.includes('none'))S.hats.unshift('none');if(!S.hats.includes(S.hat))S.hat='none';S.decos=S.decos.filter(id=>DECOS[id]);
+Store.clean=function(){S.hats=S.hats.filter(id=>HATS[id]);if(!S.hats.includes('none'))S.hats.unshift('none');if(!S.hats.includes(S.hat))S.hat='none';S.decos=S.decos.filter(id=>DECOS[id])};
+Store.clean();
 const Mascot=(function(){
   function svg(hat){return `<svg class="m-svg" viewBox="0 0 120 130" aria-hidden="true">
   <path d="M18 132Q60 90 102 132Z" fill="#fff" stroke="#cfc4a0" stroke-width="3"/><path d="M40 106Q64 120 92 106L98 122Q64 134 34 120Z" fill="#7a4fb0" stroke="#4a2c80" stroke-width="2"/>
@@ -1097,11 +1151,21 @@ Screens.reg('title',{
     root.append(h('div',{class:'tlogo'},[h('div',{class:'tsub',text:'Ancient Rome needs you!'}),h('h1',{class:'h1',html:'Roman Numeral<br>Kingdom Builder'})]),
       h('div',{class:'city tcity'}),
       h('div',{class:'trow'},[h('button',{class:'btn gold big',text:started?'Continue ▶':'Play! ▶',onclick:()=>{Snd.unlock();Snd.play('good');Screens.go('map')}})]),
+      ...(Who.hosted()?[]:[h('button',{class:'btn small ghost','aria-label':'Playing as '+Who.name()+'. Change player',text:Who.icon()+' '+Who.name()+' \u00B7 Change player',onclick:()=>{Snd.play('tap');Screens.go('who')}})]),
       ...(started?[h('button',{class:'btn small ghost',text:'Start over',onclick:()=>{Snd.play('tap');UI.confirmReset()}})]:[]),
       h('div',{class:'coach tcoach'}));
     City.render($('.tcity',root),{});
     Mascot.mount($('.coach',root));
     Mascot.say(started?'Welcome back, builder! Your city is waiting!':'Salve! I am Leo. Let’s build a Roman city and learn the numbers together!',{mood:'cheer'})}});
+Screens.reg('who',{
+  enter(root){root.innerHTML='';root.classList.add('center');const cur=Who.get();
+    root.append(h('div',{class:'tlogo'},[h('div',{class:'tsub',text:'Who is playing?'})]),
+      h('div',{class:'whoRow',role:'group','aria-label':'Choose your animal'},Who.SLOTS.map(x=>{const m=Store.summary(x.id);
+        return h('button',{class:'who'+(x.id===cur?' on':''),'aria-label':x.name+(m.stars?', '+m.stars+' stars':', new player'),onclick:()=>{Snd.unlock();Snd.play('good');Game.choosePlayer(x.id)}},
+          [h('span',{class:'wi',text:x.icon}),h('span',{text:x.name}),h('small',{text:m.stars?'\u2B50 '+m.stars:'New!'})])})),
+      ...(localStorage.getItem('rnk_legacy_copied')==='1'&&Store.has('lion')?[h('div',{class:'whoNote',text:'Your kingdom from before is with the Lion.'})]:[]),
+      h('div',{class:'coach tcoach'}));
+    Mascot.mount($('.coach',root));Mascot.say('Tap your animal, builder!',{mood:'cheer'})}});
 Screens.reg('map',{w:0,
   enter(root,p){root.innerHTML='';root.classList.remove('center');
     if(p.w)this.w=p.w;
@@ -1133,7 +1197,7 @@ try{if('serviceWorker' in navigator&&(location.protocol==='https:'||/^(localhost
     window.addEventListener('online',ensure);
   }catch(e){}})}catch(e){}
 /*== JS-END ==*/
-window.addEventListener('DOMContentLoaded',()=>{Screens.go('title');LearningHook.startOnce();if(location.hash==='#selftest')SelfTest.show();else if(location.hash==='#events')EventsView.show()});
+window.addEventListener('DOMContentLoaded',()=>{if(Who.needChooser)Screens.go('who');else{Screens.go('title');LearningHook.startOnce()}if(location.hash==='#selftest')SelfTest.show();else if(location.hash==='#events')EventsView.show()});
 </script>
 </body>
 </html>
