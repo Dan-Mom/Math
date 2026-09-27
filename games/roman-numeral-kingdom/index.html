@@ -294,7 +294,7 @@ svg.star{width:34px;height:34px}svg.star.off{filter:grayscale(1) brightness(1.6)
        ("*" only while this is a prototype; a host should set PE_LEARNING_CONTEXT.hostOrigin)
   LearningHook.peek() -> copy of the queue;  .count();  .clear();  page address #events shows the queue on screen.
   Events (each fires once per real child action, never on re-render):
-    started            {}                          very first open (remembered in localStorage lp_started_v1)
+    started            {}                          first open per lesson+profile (remembered in localStorage lp_started_v1:<lesson>:<profile>)
     activity_completed {unit:"world1|2|3", activity:"symbol-catch|block-builder|memory-match|master-builder|speedy-catch",
                         score, max, stars, attempts, hints}    score is capped at max; attempts = answer taps/checks/flip-pairs
     gate_passed        {unit, correct, total, attempts}        correct = riddles right on the first try; attempts = answer taps
@@ -305,24 +305,32 @@ svg.star{width:34px;height:34px}svg.star.off{filter:grayscale(1) brightness(1.6)
 const LearningHook=(function(){
   const LESSON='math.g3.roman-numeral-kingdom',QK='lp_events_v1',PK='lp_profile_v1',SK='lp_started_v1',MAX=500;
   const rid=n=>{let s='';try{const a=new Uint8Array(n);crypto.getRandomValues(a);a.forEach(x=>s+=(x%36).toString(36))}catch(e){for(let i=0;i<n;i++)s+=Math.floor(Math.random()*36).toString(36)}return s};
-  const session=rid(8);let memProfile=null,mem=[],segStart=Date.now(),ended=false;
+  const session=rid(8);let memProfile=null,memStarted={},segStart=Date.now(),ended=false;
   const ctx=()=>{try{return(window.PE_LEARNING_CONTEXT&&typeof window.PE_LEARNING_CONTEXT==='object')?window.PE_LEARNING_CONTEXT:{}}catch(e){return{}}};
   function profile(){const c=ctx();if(c.profile)return String(c.profile);
     try{let p=localStorage.getItem(PK);if(!p){p='p'+rid(10);localStorage.setItem(PK,p)}return p}catch(e){return memProfile||(memProfile='p'+rid(10))}}
-  function read(key){try{const a=JSON.parse(localStorage.getItem(key)||'[]');if(Array.isArray(a))return a}catch(e){}return null}
-  function append(ev,key){key=key||QK;
-    try{const a=read(key)||[];a.push(ev);while(a.length>MAX)a.shift();localStorage.setItem(key,JSON.stringify(a));return true}catch(e){}
-    if(key===QK){mem.push(ev);while(mem.length>MAX)mem.shift()}return false}
+  /* Bounded queue over a storage-like object {getItem,setItem,removeItem}. If writing (or reading) throws, it keeps a
+     bounded in-memory queue (max MAX, oldest dropped, no duplicates) and peek() returns that combined ordered queue. */
+  function makeQueue(store,key,max){let mem=[],failed=false;
+    const rs=()=>{try{const raw=store.getItem(key);if(raw==null)return[];const a=JSON.parse(raw);return Array.isArray(a)?a:[]}catch(e){return null}};
+    function append(ev){let base=failed?mem:rs();if(base===null){failed=true;base=mem}
+      base=base.slice();if(base.indexOf(ev)<0)base.push(ev);while(base.length>max)base.shift();
+      try{store.setItem(key,JSON.stringify(base));if(failed&&rs()!==null){failed=false;mem=[]}return true}catch(e){failed=true;mem=base;return false}}
+    const peek=()=>(failed?mem:(rs()||mem)).slice();
+    return{append,peek,count:()=>peek().length,clear(){try{store.removeItem(key)}catch(e){}mem=[];failed=false},get failed(){return failed}}}
+  const Q=makeQueue({getItem:k=>localStorage.getItem(k),setItem:(k,v)=>localStorage.setItem(k,v),removeItem:k=>localStorage.removeItem(k)},QK,MAX);
   function make(name,data){const d=Object.assign({},data||{});d.lang='en';
     return{schema:1,lesson_id:LESSON,event:String(name),ts:new Date().toISOString().replace(/\.\d+Z$/,'Z'),session,profile:profile(),data:d}}
   function deliver(ev){
     try{if(typeof window.PE_LEARNING_HOOK==='function')window.PE_LEARNING_HOOK(ev)}catch(e){}
     try{if(window.parent&&window.parent!==window)window.parent.postMessage({type:'learning-event',event:ev},ctx().hostOrigin||'*')}catch(e){}}
-  function emit(name,data){try{const ev=make(name,data);append(ev);deliver(ev);return ev}catch(e){return null}}
-  const peek=()=>(read(QK)||mem).slice();
-  return{emit,peek,count:()=>peek().length,make,append,MAX,LESSON,
-    clear(){try{localStorage.removeItem(QK)}catch(e){}mem=[]},
-    startOnce(){try{if(localStorage.getItem(SK))return;localStorage.setItem(SK,'1')}catch(e){}emit('started',{})},
+  function emit(name,data){try{const ev=make(name,data);Q.append(ev);deliver(ev);return ev}catch(e){return null}}
+  const peek=()=>Q.peek();
+  return{emit,peek,count:()=>Q.count(),make,makeQueue,MAX,LESSON,
+    clear(){Q.clear()},
+    /* 'started' once per lesson AND profile: key lp_started_v1:<lesson>:<profile>, in-memory fallback if storage is blocked */
+    startOnce(){const k=SK+':'+LESSON+':'+profile();if(memStarted[k])return;memStarted[k]=1;
+      try{if(localStorage.getItem(k))return;localStorage.setItem(k,'1')}catch(e){}emit('started',{})},
     /* time on the page: one session_end per hide */
     hide(){if(ended)return;ended=true;emit('session_end',{seconds:Math.max(0,Math.round((Date.now()-segStart)/1000))})},
     show(){ended=false;segStart=Date.now()}};
@@ -431,14 +439,31 @@ const SelfTest={
     const ev=LearningHook.make('activity_completed',{unit:'world1',activity:'block-builder',score:4,max:4,stars:3,attempts:4,hints:0});
     T(ev.schema===1&&ev.lesson_id==='math.g3.roman-numeral-kingdom'&&ev.event==='activity_completed','hook shape');
     T(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/.test(ev.ts),'hook ts');T(!!ev.session&&!!ev.profile,'hook ids');T(ev.data.lang==='en'&&!('level' in ev.data),'hook lang, no level');
-    const TK='lp_selftest_tmp';try{localStorage.removeItem(TK);for(let i=0;i<505;i++)LearningHook.append(Object.assign({},ev,{data:{i}}),TK);const a=JSON.parse(localStorage.getItem(TK));T(a.length===LearningHook.MAX&&a[0].data.i===5&&a[a.length-1].data.i===504,'hook queue cap');localStorage.removeItem(TK)}catch(e){}
-    return{pass:fails.length===0,checks,fails};
+    // event queue, tested three ways; each reported as PASS / FAIL / SKIPPED (a skipped check is never counted as a pass)
+    const Q={cap:'FAIL',nowrite:'FAIL',storage:'SKIPPED'};
+    const memStore=()=>{const d={};return{getItem:k=>(k in d?d[k]:null),setItem:(k,v)=>{d[k]=String(v)},removeItem:k=>{delete d[k]}}};
+    {const nf=fails.length,q=LearningHook.makeQueue(memStore(),'q',LearningHook.MAX);
+      for(let i=0;i<505;i++)q.append(Object.assign({},ev,{data:{i}}));const a=q.peek();
+      T(a.length===LearningHook.MAX&&a[0].data.i===5&&a[a.length-1].data.i===504&&q.count()===LearningHook.MAX,'queue cap (injected store)');
+      Q.cap=fails.length===nf?'PASS':'FAIL'}
+    {const nf=fails.length,st=memStore();st.setItem=()=>{throw new Error('quota')};const q=LearningHook.makeQueue(st,'q',LearningHook.MAX),e1=Object.assign({},ev,{data:{i:1}});
+      q.append(e1);q.append(e1);for(let i=2;i<505;i++)q.append(Object.assign({},ev,{data:{i}}));const a=q.peek();
+      T(a.length===LearningHook.MAX&&a[0].data.i===5&&a[a.length-1].data.i===504&&q.count()===LearningHook.MAX,'queue cap, write failing (in-memory)');
+      const q2=LearningHook.makeQueue(st,'q',LearningHook.MAX);q2.append(e1);q2.append(e1);T(q2.count()===1&&q2.peek()[0]===e1,'queue no duplicates, write failing');
+      Q.nowrite=fails.length===nf?'PASS':'FAIL'}
+    try{const TK='lp_selftest_tmp',nf=fails.length,real={getItem:k=>localStorage.getItem(k),setItem:(k,v)=>localStorage.setItem(k,v),removeItem:k=>localStorage.removeItem(k)};
+      real.setItem(TK,'[]');real.removeItem(TK);const q=LearningHook.makeQueue(real,TK,LearningHook.MAX);
+      for(let i=0;i<505;i++)q.append(Object.assign({},ev,{data:{i}}));const a=JSON.parse(localStorage.getItem(TK));
+      T(a.length===LearningHook.MAX&&a[0].data.i===5&&a[a.length-1].data.i===504,'queue cap (real localStorage)');real.removeItem(TK);
+      Q.storage=fails.length===nf?'PASS':'FAIL'}catch(e){Q.storage='SKIPPED'}
+    return{pass:fails.length===0,checks,fails,queue:Q};
   },
   show(){
-    const r=this.run();console.log('[selftest] '+(r.pass?'PASS':'FAIL')+' ('+r.checks+' checks)',r.fails.slice(0,20));
+    const r=this.run();console.log('[selftest] '+(r.pass?'PASS':'FAIL')+' ('+r.checks+' checks) queue:'+JSON.stringify(r.queue),r.fails.slice(0,20));
     let d=$('#selftest');if(!d){d=h('div',{id:'selftest'});document.body.append(d)}
     d.className=r.pass?'pass':'fail';
     d.innerHTML='<b>'+(r.pass?'PASS':'FAIL')+'</b> &nbsp;Roman numeral self-test<br>'+r.checks+' checks &middot; 999 round trips &middot; non-standard forms rejected'+(r.fails.length?'<br>'+r.fails.slice(0,12).join('<br>'):'')
+      +'<br><span id="st-queue" style="font-size:14px">Event queue: cap <b>'+r.queue.cap+'</b> &middot; storage-failure fallback <b>'+r.queue.nowrite+'</b> &middot; real localStorage <b>'+r.queue.storage+'</b></span>'
       +'<br><span style="font-size:14px">Queued learning events: <b style="font-size:16px;color:#222">'+LearningHook.count()+'</b> &middot; open <b style="font-size:14px;color:#222">#events</b> to read them</span>'
       +'<br><button onclick="location.hash=\'\';this.parentNode.remove()">Close</button>';
     window.RNK_SELFTEST=r.pass?'PASS':'FAIL';return r;}
@@ -665,11 +690,13 @@ const Scroll={tab:'sym',
     return `<div class="sc-rule"><h3>The split trick</h3><p>Split any number into <b>hundreds, tens and ones</b>. Change each piece. Stick them together!</p>
       <div class="sc-split"><div><b>975</b></div><div>900</div><div>70</div><div>5</div><div class="dn">&darr;</div><div>CM</div><div>LXX</div><div>V</div><div class="dn"></div><div class="wide"><b>CMLXXV</b></div></div>
       <p class="tiny">A zero means <b>nothing</b> to write: 203 = 200 + 0 + 3 = CC + III</p></div>`},
-  open(tab){this.tab=tab||this.tab;const box=h('div',{class:'scroll-wrap'});
+  /* singleton: if the Scroll is already open, focus it instead of stacking another one on top */
+  open(tab){if(this.back&&this.back.isConnected){try{const g=this.back.querySelector('.mbtns button');g&&g.focus()}catch(e){}return}
+    this.tab=tab||this.tab;const box=h('div',{class:'scroll-wrap'});
     const tabs=h('div',{class:'sc-tabs'}),page=h('div',{class:'sc-page'});
     [['sym','Symbols'],['rules','Rules'],['pat','Pattern'],['split','Split']].forEach(([k,l])=>tabs.append(h('button',{class:'sc-tab'+(k===this.tab?' on':''),text:l,onclick:e=>{Snd.play('tap');this.tab=k;$$('.sc-tab',tabs).forEach(b=>b.classList.toggle('on',b===e.currentTarget));page.innerHTML=this.body(k);page.scrollTop=0}})));
     page.innerHTML=this.body(this.tab);box.append(tabs,page);
-    UI.modal({title:'The Cheat Scroll',cls:'scroll',body:box,dismiss:()=>{},buttons:[{text:'Got it!',cls:'green'}]});Mascot.mood('think')}
+    this.back=UI.modal({title:'The Cheat Scroll',cls:'scroll',body:box,dismiss:()=>{},buttons:[{text:'Got it!',cls:'green'}]});Mascot.mood('think')}
 };
 window.Scroll=Scroll;
 
@@ -834,6 +861,11 @@ const RNX={
     let m=`${nm} reads <b>${d.value}</b>, but we need <b>${want}</b>.`;
     if(lane.p>0&&[...s].some(c=>!pl.includes(c)))m+=` That lane uses ${pl.filter(Boolean).join(', ')}.`;
     else if(nm==='Your tray')m+=' '+this.small(want);return m},
+  /* short misconception code for answer_checked, from the game's own validation reasons */
+  misTag(s,lane){const d=RN.diagnose(s);
+    if(!d.ok&&d.reason!=='empty')return d.reason==='four'||d.reason==='twice'?'repeat-limit':d.reason==='pair'?'bad-subtract':'bad-order';
+    if(d.ok&&lane&&lane.p>0&&[...s].some(c=>!RN.PLACE[lane.p].includes(c)))return 'wrong-place';
+    return 'wrong-value'},
   /* 4 build targets per activity; level 2 makes sure the subtraction pairs (4 and 9 digits) show up */
   targets(w,lvl){const ok=[1,2,3,5,6,7,8],sub=[4,9],out=new Set();let guard=0;
     while(out.size<4&&guard++<200){const i=out.size;let n;
@@ -866,7 +898,7 @@ Screens.reg('build',withTimers({
     root.append(Act.head(root,p,this.roundEl),this.tbox,this.lanesEl,this.palEl,h('div',{class:'bacts'},[this.clearBtn,this.mainBtn]),h('div',{class:'coach'}));
     Act.intro(p,{title:this.lvl===1?'Block Builder!':'Master Builder!',body:BUILD_INTRO[p.w+'.'+this.lvl]},()=>this.round())},
   leave(){this.clearTimers();this.dr=null;$$('.blk.ghost').forEach(g=>g.remove())},
-  round(){const n=this.targets[this.r];this.n=n;this.wrong=0;this.locked=false;this.mode='check';this.sel=null;this.mainBtn.textContent='Check ✓';this.mainBtn.className='btn green';this.mainBtn.disabled=false;
+  round(){const n=this.targets[this.r];this.n=n;this.wrong=0;this.ia=0;this.sig=null;this.locked=false;this.mode='check';this.sel=null;this.mainBtn.textContent='Check ✓';this.mainBtn.className='btn green';this.mainBtn.disabled=false;
     const sp=RN.split(n),info=this.w===1?[{p:0,part:n,roman:RN.toRoman(n),name:'Your tray'}]:(this.w===2?sp.slice(1):sp).map(x=>({p:x.p,part:x.value,roman:x.roman,name:x.place[0].toUpperCase()+x.place.slice(1)}));
     this.lanes=info.map(x=>Object.assign({blocks:[]},x));this.roundEl.innerHTML=`Puzzle <b>${this.r+1}</b> of 4`;
     const parts=sp.filter(x=>x.value>0).map(x=>x.value).join(' + ');
@@ -879,7 +911,7 @@ Screens.reg('build',withTimers({
       this.lanesEl.append(l.el);this.paint(l)});
     $$('.blk.pal',this.palEl).forEach(b=>b.classList.remove('sel'));this.lanesEl.classList.remove('await');
     Mascot.say(this.r===0?(this.w===1?'Let’s build! Drag a block into the tray.':'Split the number, then build each lane!'):pick(['Next one!','Here comes another!','You are a great builder!']),{mood:'cheer'})},
-  paint(l){const t=$('.tray',l.el);t.innerHTML='';l.el.classList.remove('ok','bad');
+  paint(l){this.sig=null;const t=$('.tray',l.el);t.innerHTML='';l.el.classList.remove('ok','bad');
     l.blocks.forEach((s,i)=>{const b=h('div',{class:'blk',role:'button',tabindex:'0','aria-label':'Remove block '+s,html:`<span>${s}</span><i>${RN.VAL[s]}</i>`,onclick:()=>{if(this.locked)return;l.blocks.splice(i,1);Snd.play('tap');this.paint(l)}});t.append(b)});
     if(!l.blocks.length)t.append(h('span',{class:'ph',text:this.sel?'tap to place':'drop blocks here'}));
     const pv=$('.lprev',l.el);if(this.w===1&&this.lvl<=2&&l.blocks.length){const s=l.blocks.join(''),v=RN.fromRoman(s);pv.innerHTML=v!==null?`${RNX.expl(s)} = <b>${v}</b>`:'<i>Hmm, that is not a proper Roman number yet</i>'}else pv.innerHTML=''},
@@ -896,10 +928,14 @@ Screens.reg('build',withTimers({
     if(!d.moved)this.select(d.s);else{const l=this.laneAt(e.clientX,e.clientY);if(l)this.place(l,d.s);else Snd.play('tap')}},
   check(){if(this.locked)return;
     if(this.lanes.every(l=>!l.blocks.length)){Snd.play('tap');Mascot.say('Put some blocks in the tray first! Drag them, or tap a block and then tap the tray.',{mood:'think'});return}
-    this.att++;const bad=[];this.lanes.forEach(l=>{const s=l.blocks.join('');l.ok=s===l.roman;l.el.classList.toggle('ok',l.ok);if(!l.ok)bad.push(l)});
+    const sig=this.lanes.map(l=>l.blocks.join('')).join('|');if(sig===this.sig)return; /* same submission twice (double-click): graded once */
+    this.sig=sig;this.att++;this.ia++;const bad=[];this.lanes.forEach(l=>{const s=l.blocks.join('');l.ok=s===l.roman;l.el.classList.toggle('ok',l.ok);if(!l.ok)bad.push(l)});
+    const ac={unit:Act.unit(this.p),activity:NODES[this.p.i].id,item:'n'+this.n,correct:!bad.length,attempt:this.ia};
+    if(bad.length)ac.tag=RNX.misTag(bad[0].blocks.join(''),bad[0]);LearningHook.emit('answer_checked',ac);
     if(!bad.length)return this.win();
     this.wrong++;Snd.play('oops');bad.forEach(l=>{l.el.classList.remove('bad');void l.el.offsetWidth;l.el.classList.add('bad')});
     if(this.wrong>=2)return this.reveal();
+    this.hints++;Act.hint(this.p); /* the mascot's first instructional hint counts like every other hint */
     Mascot.say(RNX.why(bad[0].blocks.join(''),bad[0])+' Try again!',{html:true,mood:'oops'})},
   clearSel(){this.sel=null;$$('.blk.pal',this.palEl).forEach(b=>b.classList.remove('sel'));this.lanesEl.classList.remove('await');this.lanes.forEach(l=>l.el.classList.remove('await','hot'))},
   win(){this.locked=true;this.clearSel();if(this.wrong===0)this.clean++;Game.addCoins(2);Snd.play('click');this.later(()=>Snd.play('good'),200);
@@ -979,28 +1015,43 @@ const Riddle={
   num(w){return w===1?1+rnd(9):w===2?10+rnd(90):100+rnd(900)},
   additive(n){return RN.split(n).map(p=>{const d=p.digit,s=RN.PLACE[p.p];return d<5?s[0].repeat(d):d<9?s[1]+s[0].repeat(d-5):s[1]+s[0].repeat(4)}).join('')},
   badWhy(s){const d=RN.diagnose(s);return d.reason==='four'?`<b class="rs">${s}</b> has 4 of the same in a row. Rome uses a subtraction pair instead!`:d.reason==='pair'?`<b class="rs">${d.pair}</b> is not one of the 6 subtraction pairs. ${RNX.pairWhy(d.pair)}`:d.reason==='twice'?`<b class="rs">${d.sym}</b> can only be used one time. V, L and D never repeat!`:`<b class="rs">${s}</b> is not written the Roman way. ${RNX.orderWhy(s)||'Big to small, then add!'}`},
-  make(type,w){let n,r;
-    if(type==='r2n'){do{n=this.num(w)}while(w>1&&Math.random()<.5&&!RN.toRoman(n).match(/CM|CD|XC|XL|IX|IV/));r=RN.toRoman(n);
+  /* fx = optional forced target number (used only by the deterministic never-repeat fallback in set) */
+  make(type,w,fx){let n,r;
+    if(type==='r2n'){do{n=fx!=null?fx:this.num(w)}while(fx==null&&w>1&&Math.random()<.5&&!RN.toRoman(n).match(/CM|CD|XC|XL|IX|IV/));r=RN.toRoman(n);
       const addAll=RNX.tokens(r).reduce((a,t)=>a+(t.length===2?RN.VAL[t[0]]+RN.VAL[t[1]]:RN.VAL[t]),0),u=w===1?1:w===2?10:100;
       return{n,q:`What number is <b class="rs big">${r}</b> ?`,ans:String(n),opts:this.opts(n,[addAll,n+u,n-u,n+1,n-1,n+u*2].filter(x=>x>0&&x!==n),4),
         h1:'Look for a small symbol <b>right in front</b> of a bigger one &mdash; that one takes away!',h2:`<b class="rs">${r}</b> = ${RNX.expl(r)} = <b>${n}</b>.`}}
-    if(type==='n2r'){n=this.num(w);r=RN.toRoman(n);const u=w===1?1:w===2?10:100;
+    if(type==='n2r'){n=fx!=null?fx:this.num(w);r=RN.toRoman(n);const u=w===1?1:w===2?10:100;
       return{n,q:`Which is the Roman numeral for <b class="big">${n}</b> ?`,ans:r,opts:this.opts(r,[this.additive(n),[...r].reverse().join(''),RN.toRoman(n+u),RN.toRoman(Math.max(1,n-u)),RN.toRoman(n+1)].filter(x=>x!==r),4),
         h1:RN.split(n).filter(p=>p.value).length===1?RNX.small(n):`Split it first: ${RN.split(n).filter(p=>p.value).map(p=>p.value).join(' + ')}. Then change each piece!`,h2:RNX.story(n)}}
     if(type==='bad'){const good=shuffle(Array.from({length:60},()=>this.num(w))).filter((v,i,a)=>a.indexOf(v)===i).slice(0,3).map(RN.toRoman),bad=pick(BAD_FORMS[w]);
       return{n:null,q:'Which one is <b>NOT</b> a proper Roman numeral?',ans:bad,opts:shuffle([bad,...good]),h1:'Only <b>I, X and C</b> can go in front (I before V or X, X before L or C, C before D or M). V, L and D never take away, and never <b>4</b> of the same in a row!',h2:this.badWhy(bad)}}
-    if(type==='twin'){const d=[2,3,4,6,7,8,9][rnd(7)],pl=w-1,from=RN.digitRoman(d,pl-1),to=RN.digitRoman(d,pl),v=d*Math.pow(10,pl);
+    if(type==='twin'){const pl=w-1,d=fx!=null?fx/Math.pow(10,pl):[2,3,4,6,7,8,9][rnd(7)],from=RN.digitRoman(d,pl-1),to=RN.digitRoman(d,pl),v=d*Math.pow(10,pl);
       return{n:v,q:`<b class="rs">${from}</b> is ${d*Math.pow(10,pl-1)}. Using the <b>same pattern</b>, what is <b>${v}</b> ?`,ans:to,
         opts:this.opts(to,[from,RN.digitRoman(d,pl+1>2?1:pl+1),RN.digitRoman(d===9?8:d+1,pl),RN.digitRoman(d===2?3:d-1,pl)].filter(x=>x!==to&&x!==''),4),
         h1:'Same shape as before &mdash; just swap the three symbols!',h2:`<b class="rs">${from}</b> and <b class="rs">${to}</b> have the same shape. Swap ${RN.PLACE[pl-1].join(' ')} for ${RN.PLACE[pl].join(' ')}!`}}
-    /* split */ const pl=w-1;do{n=this.num(w)}while(RN.split(n)[3-1-pl].digit===0);const pc=RN.split(n)[2-pl],nm=['ones','tens','hundreds'][pl];
+    /* split */ const pl=w-1;do{n=fx!=null?fx:this.num(w)}while(fx==null&&RN.split(n)[3-1-pl].digit===0);const pc=RN.split(n)[2-pl],nm=['ones','tens','hundreds'][pl];
       return{n,q:`Split <b>${n}</b>. What is the <b>${nm}</b> piece (${pc.value}) in Roman?`,ans:pc.roman,
         opts:this.opts(pc.roman,[RN.digitRoman(pc.digit,Math.max(0,pl-1)),RN.digitRoman(pc.digit,Math.min(2,pl+1)),RN.digitRoman(pc.digit===9?8:pc.digit+1,pl),RN.digitRoman(pc.digit===1?2:pc.digit-1,pl)].filter(x=>x!==pc.roman&&x!==''),4),
         h1:`The ${nm} piece is ${pc.value}. Use the ${nm} symbols: ${RN.PLACE[pl].join(' ')}.`,h2:RNX.story(n)}},
+  /* first unused target that is valid for this riddle type (ascending scan, no randomness) */
+  alt(x,w,used){const lo=w===1?1:w===2?10:100,hi=w===1?9:w===2?99:999,pl=w-1;
+    if(x==='twin'){for(const d of [2,3,4,6,7,8,9]){const c=d*Math.pow(10,pl);if(!used.has(c))return c}return null}
+    for(let c=lo;c<=hi;c++)if(!used.has(c)&&(x!=='split'||RN.split(c)[2-pl].digit!==0))return c;return null},
   set(w){const pool=w===1?['r2n','n2r','bad','r2n','n2r']:['r2n','n2r','bad','twin','split'];const t=shuffle(pool);
     const pick3=[];t.forEach(x=>{if(pick3.length<3&&!pick3.includes(x))pick3.push(x)});
     const used=new Set();  /* never the same number in two riddles of one gate: re-roll duplicates */
-    return pick3.map(x=>{let q,g=0;do{q=this.make(x,w)}while(q.n!=null&&used.has(q.n)&&g++<30);if(q.n!=null)used.add(q.n);return q})}
+    return pick3.map(x=>{let q,g=0;do{q=this.make(x,w)}while(q.n!=null&&used.has(q.n)&&g++<30);
+      if(q.n!=null&&used.has(q.n)){ /* retry cap hit: fall back deterministically to the first unused number that fits this riddle type */
+        const c=this.alt(x,w,used);if(c!=null)q=this.make(x,w,c)}
+      if(q.n!=null)used.add(q.n);q.type=x;return q})},
+  /* answer_checked helpers: stable item id and misconception tag for a wrong pick */
+  item(q){return 'gate-'+q.type+'-'+(q.n!=null?q.n:q.ans)},
+  tag(q,o,w){
+    if(q.type==='r2n'){const r=RN.toRoman(+q.ans),all=RNX.tokens(r).reduce((a,t)=>a+(t.length===2?RN.VAL[t[0]]+RN.VAL[t[1]]:RN.VAL[t]),0);return o===String(all)?'bad-subtract':'wrong-value'}
+    if(q.type==='n2r')return RNX.misTag(o,null);
+    if(q.type==='twin'||q.type==='split')return [...o].every(c=>RN.PLACE[w-1].includes(c))?'wrong-value':'wrong-place';
+    return 'wrong-value'}
 };
 Screens.reg('gate',withTimers({
   enter(root,p){this.p=p;this.w=p.w;root.innerHTML='';this.clearTimers();this.qs=Riddle.set(p.w);this.i=0;this.perfect=0;this.taps=0;this.hints=0;this.opening=false;
@@ -1024,9 +1075,9 @@ Screens.reg('gate',withTimers({
     this.optsEl.innerHTML='';q.opts.forEach(o=>{const b=h('button',{class:'opt',html:`<span class="ol">${/^\d+$/.test(o)?o:`<span class="rs">${o}</span>`}</span>`,onclick:()=>this.pick(o,b)});this.optsEl.append(b)});
     Mascot.say(this.i===0?'Halt, builder! Answer my riddle to pass!':pick(['Here comes another riddle!','Good! One more question.']),{mood:'think'})},
   pick(o,b){if(this.locked)return;const q=this.qs[this.i];this.taps++;
-    if(o===q.ans){this.locked=true;b.classList.add('right');b.insertAdjacentHTML('afterbegin','<span class="mk">✓</span>');Snd.play('good');if(this.tries===0)this.perfect++;Game.addCoins(1);
+    if(o===q.ans){this.locked=true;LearningHook.emit('answer_checked',{unit:Act.unit(this.p),activity:'gate-keeper',item:Riddle.item(q),correct:true,attempt:this.tries+1});b.classList.add('right');b.insertAdjacentHTML('afterbegin','<span class="mk">✓</span>');Snd.play('good');if(this.tries===0)this.perfect++;Game.addCoins(1);
       Mascot.say((this.tries===0?pick(['Correct!','Right! Well done!','You know your numerals!']):'You got it!')+' '+(q.h2||''),{html:true,mood:'cheer'});this.done()}
-    else{this.tries++;b.classList.add('wrong');b.disabled=true;b.insertAdjacentHTML('afterbegin','<span class="mk">✗</span>');Snd.play('oops');this.scene.classList.remove('shake');void this.scene.offsetWidth;this.scene.classList.add('shake');
+    else{this.tries++;LearningHook.emit('answer_checked',{unit:Act.unit(this.p),activity:'gate-keeper',item:Riddle.item(q),correct:false,attempt:this.tries,tag:Riddle.tag(q,o,this.w)});b.classList.add('wrong');b.disabled=true;b.insertAdjacentHTML('afterbegin','<span class="mk">✗</span>');Snd.play('oops');this.scene.classList.remove('shake');void this.scene.offsetWidth;this.scene.classList.add('shake');
       if(this.tries>=2){this.locked=true;const rb=$$('.opt',this.optsEl).find(x=>x.textContent.replace(/[✓✗]/g,'')===q.ans);if(rb){rb.classList.add('right','glow');rb.insertAdjacentHTML('afterbegin','<span class="mk">✓</span>')}
         this.hints++;Act.hint(this.p);Mascot.say('Let me show you! '+q.h2,{html:true,mood:'think'});this.done()}
       else{this.hints++;Act.hint(this.p);Mascot.say('Not quite &mdash; try again! Hint: '+q.h1,{html:true,mood:'oops'})}}},
@@ -1076,7 +1127,11 @@ Screens.reg('map',{w:0,
     if(p.grow!=null)Snd.play('hat')}});
 /* Offline install: the service worker is an extra. Only on https or localhost; the game works fully without sw.js. */
 try{if('serviceWorker' in navigator&&(location.protocol==='https:'||/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)))
-  window.addEventListener('load',()=>{try{navigator.serviceWorker.register('./sw.js',{scope:'./'}).catch(()=>{})}catch(e){}})}catch(e){}
+  window.addEventListener('load',()=>{try{
+    const ensure=()=>{try{navigator.serviceWorker.ready.then(r=>{try{const w=r.active||navigator.serviceWorker.controller;if(w)w.postMessage('ensure')}catch(e){}}).catch(()=>{})}catch(e){}};
+    navigator.serviceWorker.register('./sw.js',{scope:'./'}).then(ensure,()=>{});
+    window.addEventListener('online',ensure);
+  }catch(e){}})}catch(e){}
 /*== JS-END ==*/
 window.addEventListener('DOMContentLoaded',()=>{Screens.go('title');LearningHook.startOnce();if(location.hash==='#selftest')SelfTest.show();else if(location.hash==='#events')EventsView.show()});
 </script>
