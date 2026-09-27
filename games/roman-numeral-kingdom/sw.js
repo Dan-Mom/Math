@@ -6,7 +6,7 @@
    Another app on the same origin has a root worker that deletes every cache not named "ttc-cache-v1".
    So: we use our own uniquely-named cache, look ONLY in our own cache, and re-fill it on request ("ensure").
 */
-const VERSION = 'v2';
+const VERSION = '20260926'; // a date stamp, not a version name: set to today's date whenever the content changes
 const PREFIX = 'rnk-roman-numeral-kingdom-';
 const CACHE = PREFIX + VERSION;
 const FILES = [
